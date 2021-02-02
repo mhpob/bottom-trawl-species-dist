@@ -1,0 +1,574 @@
+---
+title: "Trawl survey data hunt"
+author: "Mike O'Brien"
+date: '2021-02-02'
+output:
+  pdf_document: default
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Survey data warehousing
+
+The main websites that seem to host NOAA dataset metadata are [catalog.data.gov](https://catalog.data.gov/) and [NOAA fisheries InPort repository](https://www.fisheries.noaa.gov/inport). Both of these produce the same result: pointing to a public NEFSC FTP server. Most (all?) of what I report here was found by digging through the InPort repository.
+
+A website of note is the [InPort "Bottom Trawl Surveys" page](https://www.fisheries.noaa.gov/inport/item/22557), wherein metadata for all four seasonal bottom trawl surveys are linked, along with PDFs to those publications which provide conversion factors.
+
+Though likely not of use here, there also seems to be a [plankton database](https://www.fisheries.noaa.gov/inport/item/9286), 1971 - present.
+
+
+## NEFSC seasonal bottom trawl surveys
+### Fall Bottom Trawl Survey
+
+From the [entry metadata](https://www.fisheries.noaa.gov/inport/item/22560):
+
+> The provided Fall Bottom Trawl Survey time series from 1963 - most recently audited data set (2018) contain standard audited raw survey results without adjustments for changes in gear and/or vessel over the length of the time series. All "good" tows are included in these data sets. Additional non-representative tows are available upon request only. All inquiries for obtaining calibration information for vessel and gear changes should be addressed to the Chief of the Population Dynamics Branch or Chief of the Resource Evaluation and Assessment Division of the Northeast Fisheries Science Center (NEFSC).
+
+So, we have raw, uncalibrated values from 1963 through 2019. Probably not the best since the gear has changed so often, but it's a start. To download the [Fall Bottom Trawl Survey](https://catalog.data.gov/dataset/fall-bottom-trawl-survey), we can run the following code (not run here).
+
+```{r eval=FALSE}
+# Download zipped folder (containing CSV files) from URL
+download.file(paste0('ftp://ftp.nefsc.noaa.gov/pub/dropoff/',
+                     'PARR/PEMAD/ESB/22560/22560_FSCSTables.zip'),
+              destfile = 'data/22560_FSCSTables.zip')
+
+# Unzip folder to separate directory
+unzip('data/22560_FSCSTables.zip',
+      exdir = 'data/22560_FSCSTables')
+
+# Delete zipped folder
+file.remove('data/22561_FSCSTables.zip')
+```
+
+This contains 4 CSV files:
+
+```{r}
+list.files('data/22560_FSCSTables')
+```
+
+- 22560_UNION_FSCS_SVBIO.csv
+  - Individual Fish Data - Additional parameters collected from individual fish (other than length): sex, individual weight, gonad maturation, age, and overall volume of stomach contents.
+- 22560_UNION_FSCS_SVCAT.csv
+  - Aggregate Species Data - Tow-by-tow total weight and number of each species.
+- 22560_UNION_FSCS_SVLEN.csv
+  - Species Length Frequencies - Summarized number of fish measured at each length interval
+- 22560_UNION_FSCS_SVSTA.csv
+  - Station Data - Vessel-related information (e.g., cruise ID, location, speed, course, etc.) and surface and bottom sea water temperature and salinity
+  
+  
+
+### Spring Bottom Trawl Survey
+
+From the [entry metadata](https://www.fisheries.noaa.gov/inport/item/22561):
+
+> The standardized NEFSC Spring Bottom Trawl Survey was initiated in 1968 and covered an area from Cape Hatteras, NC, to Nova Scotia, Canada, at depths >27m. Throughout the years, coverage has extended as far south as Florida and sampling depths have ranged from <27m to 366m. Currently, the survey coverage is from Cape Lookout, NC to Nova Scotia, including Georges Bank and the Gulf of Maine. The depth range minimum is >18 m, as the result of a change in the sampling platform. This has resulted in the exclusion of many inshore strata.
+
+```{r eval=FALSE}
+download.file(paste0('ftp://ftp.nefsc.noaa.gov/pub/dropoff/',
+                     'PARR/PEMAD/ESB/22561/22561_FSCSTables.zip'),
+              destfile = 'data/22561_FSCSTables.zip')
+
+unzip('data/22561_FSCSTables.zip',
+      exdir = 'data/22561_FSCSTables')
+
+file.remove('data/22561_FSCSTables.zip')
+```
+
+The Spring Bottom Trawl dataset contains similar files to the Fall:
+
+```{r}
+list.files('data/22561_FSCSTables')
+```
+
+
+
+### Others
+
+- [Winter Bottom Trawl Survey](https://www.fisheries.noaa.gov/inport/item/22563) (1992 - 2007)
+  - Just within the "1-2 decade-long dataset" bounds, though much shorter than Spring/Fall time series.
+- [Summer Bottom Trawl Survey](https://www.fisheries.noaa.gov/inport/item/22562) (1991 - 1995)
+  - Likely too short for our purposes.
+  
+
+### Support data
+
+There are many abbreviations, etc., associated with the provided datasets. The "Support Tables" cover these.
+
+```{r eval=FALSE}
+download.file(paste0('ftp://ftp.nefsc.noaa.gov/pub/dropoff/',
+                     'PARR/PEMAD/ESB/SVDBS/SVDBS_SupportTables.zip'),
+              destfile = 'data/SVDBS_SupportTables.zip')
+
+unzip('data/SVDBS_SupportTables.zip',
+      exdir = 'data/SVDBS_SupportTables')
+
+file.remove('data/SVDBS_SupportTables.zip')
+```
+
+  
+  
+
+## General summaries
+### Fall survey
+#### Data import and cleaning
+
+\  
+
+Import survey data:
+
+```{r}
+library(data.table)
+
+svcat <- fread(
+  grep('SVCAT', list.files('data/22560_FSCSTables', full.names = T), value = T),
+  col.names = tolower, fill = T
+  )
+
+# Quick data cleaning
+svcat[!grepl('^\\d', svspp), ':='(
+  logged_species_name = paste(logged_species_name, svspp, catchsex),
+  svspp = expcatchnum,
+  catchsex = expcatchwt,
+  expcatchnum = v11,
+  expcatchwt = v12)]
+svcat[, c('v11', 'v12') := NULL]
+svcat[, ':='(logged_species_name = tolower(logged_species_name),
+             svspp = as.numeric(svspp),
+             id = as.character(id))]
+```
+
+Import the support table containing species codes:
+
+```{r}
+species_list <- fread(input = 'data/svdbs_supporttables/svdbs_svspecies_list.csv',
+                      col.names = tolower,
+                      fill = T
+                      )
+
+# Quick data cleaning
+species_list[!grepl('^\\d', svspp), ':='(
+  comname = paste(comname, svspp, v1),
+  svspp = v2)]
+species_list[, c('v1', 'v2') := NULL]
+species_list[, svspp := as.numeric(svspp)]
+species_list[, c('sciname', 'comname') := lapply(.SD, tolower), .SDcols = c('sciname', 'comname')]
+```
+
+Join the survey data with the species codes to get consistent common names:
+
+```{r}
+svcat <- species_list[svcat, on = 'svspp']
+```
+
+\  
+\  
+
+#### Visualization
+
+```{r}
+n_total <- svcat[, .(catch = sum(expcatchnum, na.rm = T),
+                     wgt = sum(expcatchwt, na.rm = T)), by = comname]
+setorder(n_total, -catch)
+catch_order <- unique(n_total$comname)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = catch_order)]
+
+library(ggplot2)
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = catch, y = comname)) +
+  labs(x = 'Number', y = '', title = 'Top 20 species (by number)',
+       subtitle = 'Note: uncorrected values')
+
+setorder(n_total, -wgt)
+wgt_order <- unique(n_total$comname)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = unique(n_total$comname))]
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = wgt, y = comname)) +
+  labs(x = 'Weight', y = '', title = 'Top 20 species (by weight)',
+       subtitle = 'Note: uncorrected values')
+
+```
+
+\  
+\  
+
+##### Subset by those encountered in the mid-Atlantic
+
+Import station data and join with species data:
+```{r}
+svsta <- fread(
+  grep('SVSTA', list.files('data/22560_FSCSTables', full.names = T), value = T),
+  col.names = tolower
+  )
+
+svsta[, id := as.character(id)]
+
+svcat <- svsta[svcat, on = c('cruise6', 'stratum', 'tow', 'station', 'id')]
+
+midatl <- svcat[area %between% c(612, 636)]
+```
+
+
+```{r}
+n_total <- midatl[, .(catch = sum(expcatchnum, na.rm = T),
+                      wgt = sum(expcatchwt, na.rm = T)), by = comname]
+setorder(n_total, -catch)
+catch_order <- unique(n_total$comname)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = catch_order)]
+
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = catch, y = comname)) +
+  labs(x = 'Number', y = '',
+       title = 'Top 20 species in mid-Atlantic statistical areas (by number)',
+       subtitle = 'Note: uncorrected values')
+
+setorder(n_total, -wgt)
+wgt_order <- unique(n_total$comname)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = wgt_order)]
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = wgt, y = comname)) +
+  labs(x = 'Weight', y = '',
+       title = 'Top 20 species in mid-Atlantic statistical areas (by weight)',
+       subtitle = 'Note: uncorrected values')
+```
+
+```{r}
+n_yr <- midatl[, .(catch = sum(expcatchnum, na.rm = T),
+                      wgt = sum(expcatchwt, na.rm = T)), by = .(comname, est_year)]
+
+n_yr <- n_yr[, comname := factor(comname, ordered = T,
+                                 levels = catch_order)]
+
+
+ggplot(data = n_yr[comname %in% catch_order[1:5]]) +
+  geom_line(aes(x = est_year, y = catch)) +
+  labs(x = NULL, y = NULL,
+       title = 'Number per year in mid-Atlantic statistical areas',
+       subtitle = 'Top 5 species, uncorrected values') +
+  facet_wrap(~ comname, ncol = 1, scales = 'free_y')
+
+n_yr <- n_yr[, comname := factor(comname, ordered = T,
+                                 levels = wgt_order)]
+
+ggplot(data = n_yr[comname %in% wgt_order[1:5]]) +
+  geom_line(aes(x = est_year, y = wgt)) +
+  labs(x = NULL, y = NULL,
+       title = 'Weight per year in mid-Atlantic statistical areas',
+       subtitle = 'Top 5 species, uncorrected values') +
+  facet_wrap(~ comname, ncol = 1, scales = 'free_y')
+```
+
+
+#### Quick map
+
+Import data and convert to spatial objects:
+```{r}
+library(sf)
+
+spatial_midatl <- st_as_sf(midatl,
+                          coords = c('decdeg_beglon', 'decdeg_beglat'),
+                          remove = F,
+                          crs = 4326)
+
+coast <- read_sf('data/mapping/natural earth',
+                 wkt_filter = st_as_text(st_as_sfc(st_bbox(spatial_midatl))))
+```
+
+
+Make a map:
+
+```{r message=FALSE}
+# Convex hulls by yearf or top 6 species by number
+hulls <- spatial_midatl[spatial_midatl$comname %in% catch_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_convex_hull()
+
+# Centroids by year for top 6 species by number
+centroids <- spatial_midatl[spatial_midatl$comname %in% catch_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_centroid()
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = hulls, aes(color = as.factor(est_year)), fill = NA) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by number: convex hulls') +
+  facet_wrap(~comname, nrow = 2)
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = centroids, aes(color = as.factor(est_year))) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by number: centroids') +
+  facet_wrap(~comname, nrow = 2)
+```
+
+
+```{r message=FALSE}
+# Convex hulls by yearf or top 6 species by weight
+hulls <- spatial_midatl[spatial_midatl$comname %in% wgt_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_convex_hull()
+
+# Centroids by year for top 6 species by weight
+centroids <- spatial_midatl[spatial_midatl$comname %in% wgt_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_centroid()
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = hulls, aes(color = as.factor(est_year)), fill = NA) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by weight: convex hulls') +
+  facet_wrap(~comname, nrow = 2)
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = centroids, aes(color = as.factor(est_year))) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by weight: centroids') +
+  facet_wrap(~comname, nrow = 2)
+```
+
+
+### Spring survey
+#### Data import and cleaning
+
+\  
+
+Import survey data:
+
+```{r}
+svcat <- fread(
+  grep('SVCAT', list.files('data/22561_FSCSTables', full.names = T), value = T),
+  col.names = tolower, fill = T
+)
+
+# Quick data cleaning
+svcat[!grepl('^\\d', svspp), ':='(
+  logged_species_name = paste(logged_species_name, svspp, catchsex),
+  svspp = expcatchnum,
+  catchsex = expcatchwt,
+  expcatchnum = v1,
+  expcatchwt = v2)]
+svcat[, c('v1', 'v2') := NULL]
+svcat[, ':='(logged_species_name = tolower(logged_species_name),
+             svspp = as.numeric(svspp),
+             id = as.character(id))]
+```
+
+Join the survey data with the species codes to get consistent common names:
+
+```{r}
+svcat <- species_list[svcat, on = 'svspp']
+```
+
+\  
+\  
+
+#### Visualization
+
+```{r}
+n_total <- svcat[, .(catch = sum(expcatchnum, na.rm = T),
+                     wgt = sum(expcatchwt, na.rm = T)), by = comname]
+setorder(n_total, -catch)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = unique(n_total$comname))]
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = catch, y = comname)) +
+  labs(x = 'Number', y = '', title = 'Top 20 species (by number)',
+       subtitle = 'Note: uncorrected values')
+
+setorder(n_total, -wgt)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = unique(n_total$comname))]
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = wgt, y = comname)) +
+  labs(x = 'Weight', y = '', title = 'Top 20 species (by weight)',
+       subtitle = 'Note: uncorrected values')
+
+```
+
+\  
+\  
+
+##### Subset by those encountered in the mid-Atlantic
+
+```{r}
+svsta <- fread(
+  grep('SVSTA', list.files('data/22561_FSCSTables', full.names = T), value = T),
+  col.names = tolower
+  )
+
+svsta[, id := as.character(id)]
+
+svcat <- svsta[svcat, on = c('cruise6', 'stratum', 'tow', 'station', 'id')]
+
+midatl <- svcat[area %between% c(612, 636)]
+```
+
+```{r}
+n_total <- midatl[, .(catch = sum(expcatchnum, na.rm = T),
+                      wgt = sum(expcatchwt, na.rm = T)), by = comname]
+setorder(n_total, -catch)
+catch_order <- unique(n_total$comname)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = catch_order)]
+
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = catch, y = comname)) +
+  labs(x = 'Number', y = '',
+       title = 'Top 20 species in mid-Atlantic statistical areas (by number)',
+       subtitle = 'Note: uncorrected values')
+
+setorder(n_total, -wgt)
+wgt_order <- unique(n_total$comname)
+n_total <- n_total[, comname := factor(comname, ordered = T,
+                                          levels = wgt_order)]
+
+ggplot(data = n_total[1:20]) +
+  geom_col(aes(x = wgt, y = comname)) +
+  labs(x = 'Weight', y = '',
+       title = 'Top 20 species in mid-Atlantic statistical areas (by weight)',
+       subtitle = 'Note: uncorrected values')
+```
+
+```{r}
+n_yr <- midatl[, .(catch = sum(expcatchnum, na.rm = T),
+                      wgt = sum(expcatchwt, na.rm = T)), by = .(comname, est_year)]
+
+n_yr <- n_yr[, comname := factor(comname, ordered = T,
+                                 levels = catch_order)]
+
+
+ggplot(data = n_yr[comname %in% catch_order[1:5]]) +
+  geom_line(aes(x = est_year, y = catch)) +
+  labs(x = NULL, y = NULL,
+       title = 'Number per year in mid-Atlantic statistical areas',
+       subtitle = 'Top 5 species, uncorrected values') +
+  facet_wrap(~ comname, ncol = 1, scales = 'free_y')
+
+n_yr <- n_yr[, comname := factor(comname, ordered = T,
+                                 levels = wgt_order)]
+
+ggplot(data = n_yr[comname %in% wgt_order[1:5]]) +
+  geom_line(aes(x = est_year, y = wgt)) +
+  labs(x = NULL, y = NULL,
+       title = 'Weight per year in mid-Atlantic statistical areas',
+       subtitle = 'Top 5 species, uncorrected values') +
+  facet_wrap(~ comname, ncol = 1, scales = 'free_y')
+```
+
+
+#### Quick map
+
+Import data and convert to spatial objects:
+```{r}
+spatial_midatl <- st_as_sf(midatl,
+                          coords = c('decdeg_beglon', 'decdeg_beglat'),
+                          remove = F,
+                          crs = 4326)
+```
+
+
+Make a map:
+
+```{r message=FALSE}
+# Convex hulls by yearf or top 6 species by number
+hulls <- spatial_midatl[spatial_midatl$comname %in% catch_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_convex_hull()
+
+# Centroids by year for top 6 species by number
+centroids <- spatial_midatl[spatial_midatl$comname %in% catch_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_centroid()
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = hulls, aes(color = as.factor(est_year)), fill = NA) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by number: convex hulls') +
+  facet_wrap(~comname, nrow = 2)
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = centroids, aes(color = as.factor(est_year))) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by number: centroids') +
+  facet_wrap(~comname, nrow = 2)
+```
+
+
+```{r message=FALSE}
+# Convex hulls by yearf or top 6 species by weight
+hulls <- spatial_midatl[spatial_midatl$comname %in% wgt_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_convex_hull()
+
+# Centroids by year for top 6 species by weight
+centroids <- spatial_midatl[spatial_midatl$comname %in% wgt_order[1:6],] %>%
+  dplyr::group_by(comname, est_year) %>%
+  dplyr::summarize(geometry = st_union(geometry))%>%
+  st_centroid()
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = hulls, aes(color = as.factor(est_year)), fill = NA) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by weight: convex hulls') +
+  facet_wrap(~comname, nrow = 2)
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = centroids, aes(color = as.factor(est_year))) +
+  scale_color_viridis_d() +
+  coord_sf(xlim = c(-76.5, -71.5), ylim = c(35, 42)) +
+  labs(color = 'Year',
+       title = 'Top 6 species by weight: centroids') +
+  facet_wrap(~comname, nrow = 2)
+```
+
+
+
+## Next steps
+- Find conversion factors
+- Properly apply conversion factors
+  - [Possible lead on this here](https://noaa-edab.github.io/tech-doc/survdat.html), with [code example here](https://github.com/slucey/RSurvey/blob/master/Survdat.r)
+- Any tasks stemming from the meeting

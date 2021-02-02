@@ -1,0 +1,33 @@
+https://www.fisheries.noaa.gov/inport/item/22560
+https://catalog.data.gov/dataset/fall-bottom-trawl-survey
+
+
+
+https://noaa-edab.github.io/tech-doc/inshoresurvdat.html
+
+
+https://noaa-edab.github.io/tech-doc/survdat.html
+  https://github.com/slucey/RSurvey/blob/master/Survdat.r
+
+
+-------
+*Fall Bottom Trawl Survey
+https://www.fisheries.noaa.gov/inport/item/22560
+
+*Winter Bottom Trawl Survey
+https://www.fisheries.noaa.gov/inport/item/22563
+
+-Historical Survey Data Archive
+https://www.fisheries.noaa.gov/inport/item/27497
+
+*Spring Bottom Trawl Survey
+https://www.fisheries.noaa.gov/inport/item/22561
+
+-NJ_SOC
+https://www.fisheries.noaa.gov/inport/item/55107
+
+*Bottom Trawl Surveys
+https://www.fisheries.noaa.gov/inport/item/22557
+
+Ecosystem Monitoring
+https://www.fisheries.noaa.gov/inport/item/9285
