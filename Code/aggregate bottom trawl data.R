@@ -1,3 +1,15 @@
+# Putting a pause on this as of Feb 3, 2021 in favor of using data here:
+#   https://github.com/NOAA-EDAB/ecodata/raw/master/data-raw/Survdat.RData
+#
+#   Unable to confirm biomass conversion factors
+
+
+
+
+
+
+
+
 # Refer to "code/download trawl data" for data access.
 
 # Packages ----
@@ -115,6 +127,15 @@ fall_station <- fread(
 fall_station[, id := as.character(id)]
 
 fall <- fall_station[fall_catch, on = c('cruise6', 'stratum', 'tow', 'station', 'id')]
+
+
+
+
+
+# Apply conversion factors ----
+#   Borrowed from the excellent code here:
+#   https://github.com/slucey/RSurvey/blob/master/Survdat.r#L145-L258
+
 
 
 
