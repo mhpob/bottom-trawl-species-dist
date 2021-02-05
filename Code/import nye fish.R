@@ -1,6 +1,6 @@
 library(data.table)
 
-load('data/noaa_edab_survdat.rdata')
+survdat <- fread('data derived/survdat_w_sediment.gz')
 
 setnames(survdat, tolower)
 
@@ -23,9 +23,9 @@ nye_species <- survdat[, .SD[nye_species, on = 'svspp'],
 
 
 # Fill in necessary NA values with tow information
-nye_species[, 7:17 := lapply(.SD, function(.) fifelse(is.na(.), unique(.)[1], .)),
+nye_species[, c(7:17, 20:21) := lapply(.SD, function(.) fifelse(is.na(.), unique(.)[1], .)),
             by = c('cruise6', 'station', 'stratum', 'tow'),
-            .SDcols = 7:17]
+            .SDcols = c(7:17, 20:21)]
 
 # Set NA abundance and biomass to 0
 nye_species[, 18:19 := lapply(.SD, nafill, type = 'const', fill = 0),

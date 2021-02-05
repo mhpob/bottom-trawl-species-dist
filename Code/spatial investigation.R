@@ -1,5 +1,3 @@
-library(data.table)
-
 list.files('data/22560_FSCSTables')
 
 svcat <- fread(
