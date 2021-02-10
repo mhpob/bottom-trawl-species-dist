@@ -1,0 +1,470 @@
+---
+title: "More data assembly and some dirty modeling"
+date: '2021-02-09'
+output:
+  pdf_document: default
+  html_document: default
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Further data assembly: Trawl data
+
+### NEFSC conversion factors
+
+I was able to find all of the abundance conversion factors in the literature for abundance [@reid1999; @milliken2009; @miller2010], but was left at a loss when it came to biomass. Luckily, a lot of hard work seems to have been done by the [NOAA Ecosystems Dynamics and Assessment Branch](https://noaa-edab.github.io/tech-doc/), particularly with reference to their [`ecodata` R package](https://noaa-edab.github.io/ecodata/landing_page): nested within [the package's GitHub page](https://github.com/NOAA-EDAB/ecodata) is an aggregated file of the NEFSC spring and fall bottom trawl survey *with conversion factors already applied*. I was able to confirm the corrected abundance, but the corrected biomass is taken on faith. Note that depth, surface and bottom temperature and salinity, and recorded fish lengths are also contained in this data set.
+
+```{r echo=FALSE}
+library(data.table)
+
+load('data/noaa_edab_survdat.rdata')
+```
+
+```{r}
+# Number of observations
+nrow(survdat)
+
+# Range of dates
+range(survdat$EST_TOWDATE)
+
+# Sample of data
+head(survdat)
+```
+
+### @nye2009 species
+
+Following your suggestion, I grabbed the species used in @nye2009 (Table 1) which were selected, quote:
+
+> ...because individuals from these stocks were caught every year during the spring survey, were consistently caught in relatively high numbers, and represented a wide range of taxonomic groups...
+
+This reduced the number of species from \>400 to 30. Table 1 is recreated below:
+
+```{r echo=FALSE}
+nye_species <- fread('data derived/nye_species.csv',
+                     col.names = function(.) tolower(gsub(' ', '_', .)))
+nye_species
+```
+
+## Further data assembly: Spatial data
+
+### Ecological Marine Units: [The Nature Conservancy](https://www.conservationgateway.org/ConservationByGeography/NorthAmerica/UnitedStates/edc/reportsdata/marine/namera/Pages/default.aspx)
+
+The Nature Conservancy has aggregated seafloor habitats into ["ecologically-meaningful seabed forms"](https://www.northeastoceandata.org/YGUetVXK) like "Shallow Depression", "High Flat", and similar groups.
+
+> The Ecological Marine Units (EMU) represent all threeway combinations of depth, sediment grain size, and seabed forms based on the ecological thresholds revealed by the benthic-organism relationships
+
+While this might be nice as a model input, I can only find data for the mid-Atlantic and southern New England, south of George's Bank. If we wanted to use this in a model, it would reduce which data we could use.
+
+```{r echo=FALSE}
+library(sf)
+library(ggplot2)
+
+emus <- st_read('data derived/compiled_bottom_type.shp')
+```
+
+```{r}
+unique(emus$ecological)
+
+ggplot(data = emus) +
+  geom_sf(aes(fill = ecological)) +
+  theme(legend.position = 'none')
+```
+
+### Sediment size: [usSEABED](https://www.usgs.gov/natural-hazards/coastal-marine-hazards-and-resources/science/usseabed?qt-science_center_objects=0#qt-science_center_objects)
+
+A constituent of the EMUs is sediment size, which is luckily freely available from the USGS.
+
+```{r echo=FALSE}
+sed_size <- st_read('data/mapping/tncbenthic/benthic.gdb',
+                    layer = 'benthic_sediment')
+```
+
+```{r}
+ggplot(data = sed_size) +
+  geom_sf(aes(fill = SEDIMENT))
+```
+
+```{r}
+ggplot(data = sed_size) +
+  geom_sf(aes(fill = GRPSED))
+```
+
+## Center of mass for @nye2009 species
+
+This is going to be a bit of a figure vomit. To lessen the amount of figures, I'm only going to show those species from @nye2009 with centers of mass that actually appeared in the MAB. This means that thorny skate, Atlantic cod, haddock, pollock, white hake, cusk, American plaice, Atlantic halibut, Atlantic wolffish, longhorn sculpin, sea raven, and Acadian redfish have been removed.
+
+```{r echo=FALSE}
+nye_com <- fread('data derived/nye_com.csv')
+
+nye_ts <- melt(nye_com[, ':='(x = NULL,
+                              y = NULL)],
+               id.vars = 1:5)
+nye_ts[variable == 'depth', value := -value]
+
+nye_sp <- st_as_sf(nye_com,
+                   coords = c('lon', 'lat'),
+                   remove = F,
+                   crs = 4326)
+
+
+coast <- read_sf('data/mapping/natural earth')
+```
+
+### `r unique(nye_sp$species)[1]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[1],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[1],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[2]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[2],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[2],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[5]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[5],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[5],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[6]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[6],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[6],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[7]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[7],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[7],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[11]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[11],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[11],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[12]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[12],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[12],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[13]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[13],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[13],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[16]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[16],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[16],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[19]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[19],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[19],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[20]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[20],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[20],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[21]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[21],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[21],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[22]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[22],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[22],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[23]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[23],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[23],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[24]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[24],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[24],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[25]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[25],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[25],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+### `r unique(nye_sp$species)[27]`
+
+```{r echo=FALSE}
+ggplot(data = nye_sp[nye_sp$species == unique(nye_sp$species)[27],]) +
+  geom_sf(aes(color = year, shape = season)) +
+  geom_path(aes(x = lon, y = lat, color = year, group = season)) +
+  geom_sf(data = coast) +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 45)) + 
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = 'Year', shape = 'Season') +
+  facet_wrap(~ com_type) +
+  theme_minimal()
+  
+ggplot(data = nye_ts[nye_ts$species == unique(nye_ts$species)[27],]) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  labs(x = 'Year', y = 'Value', color = 'Season') +
+  facet_grid(variable ~ com_type, scales ='free_y') +
+  theme_bw()
+```
+
+## Next steps
+
+-   Pull in species outlined in the @curchitser proposal to NOAA
+
+    -   Atlantic butterfish
+
+    -   Longfin squid
+
+    -   Chub mackerel
+
+-   Select interesting species to focus on
+
+-   Run some quick-and-dirty species distribution models
+
+## References

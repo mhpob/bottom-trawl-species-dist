@@ -1,0 +1,167 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r}
+library(data.table)
+load('data/noaa_edab_survdat.rdata')
+
+setnames(survdat, tolower)
+
+# Drop length and sex
+survdat[, c('length', 'numlen', 'catchsex') := NULL]
+
+# Unique info by trawl
+survdat <- unique(survdat, by = c('cruise6', 'station', 'stratum', 'tow', 'svspp'))
+
+strat_key <- fread(list.files('data', 'STRATA', recursive = T, full.names = T))
+
+strat_key <- strat_key[grepl('MAB', stratum_name)]
+
+survdat <- survdat[stratum %in% strat_key$stratum]
+
+
+species_list <- fread(input = 'data/svdbs_supporttables/svdbs_svspecies_list.csv',
+                      col.names = tolower,
+                      fill = T
+                      )
+
+# Quick data cleaning
+species_list[!grepl('^\\d', svspp), ':='(
+  comname = paste(comname, svspp, v1),
+  svspp = v2)]
+species_list[, c('v1', 'v2') := NULL]
+species_list[, svspp := as.numeric(svspp)]
+species_list[, c('sciname', 'comname') := lapply(.SD, tolower), .SDcols = c('sciname', 'comname')]
+survdat <- species_list[survdat, on = 'svspp']
+
+
+
+numbers <- survdat[, lapply(.SD, sum, na.rm  = T),
+                   .SDcols = c('abundance', 'biomass'),
+                   by = 'comname']
+numbers <- numbers[survdat[, .N, by = 'comname'], on = 'comname']
+
+numbers[, ':='(rank_n = frank(-N),
+               rank_abun = frank(-abundance),
+               rank_bio = frank(-biomass))]
+numbers[, mn_rank := (rank_n + rank_abun + rank_bio) / 3]
+
+numbers[order(mn_rank)][1:10]
+
+```
+
+
+
+```{r}
+library(ggplot2)
+
+
+
+```
+
+rose et al proposal
+  summer flounder
+  black sea bass
+  scup
+  
+others
+  croaker
+  spot
+  little skate
+  
+```{r}
+library(sf)
+coast <- read_sf('data/mapping/natural earth')
+
+load('data/noaa_edab_survdat.rdata')
+
+setnames(survdat, tolower)
+
+# Drop length and sex
+survdat[, c('length', 'numlen', 'catchsex') := NULL]
+
+# Unique info by trawl
+survdat <- unique(survdat, by = c('cruise6', 'station', 'stratum', 'tow', 'svspp'))
+survdat <- species_list[survdat, on = 'svspp']
+
+survdat_sp <- st_as_sf(survdat,
+                       coords = c('lon', 'lat'),
+                       crs = 4326)
+
+```
+
+### Atlantic croaker
+```{r echo=FALSE}
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = survdat_sp[survdat_sp$svspp == 136 &
+                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
+          aes(color = log10(abundance))) +
+  scale_color_viridis_c() +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+  facet_wrap(~ year)
+```
+
+### Spot
+```{r echo=FALSE}
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = survdat_sp[survdat_sp$svspp == 149 &
+                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
+          aes(color = log10(abundance))) +
+  scale_color_viridis_c() +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+  facet_wrap(~ year)
+```
+
+### Little skate
+```{r echo=FALSE}
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = survdat_sp[survdat_sp$svspp == 26 &
+                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
+          aes(color = log10(abundance))) +
+  scale_color_viridis_c() +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+  facet_wrap(~ year)
+```
+
+### Summer flounder
+```{r echo=FALSE}
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = survdat_sp[survdat_sp$svspp == 103 &
+                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
+          aes(color = log10(abundance))) +
+  scale_color_viridis_c() +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+  facet_wrap(~ year)
+```
+
+### Black sea bass
+```{r echo=FALSE}
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = survdat_sp[survdat_sp$svspp == 141 &
+                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
+          aes(color = log10(abundance))) +
+  scale_color_viridis_c() +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+  facet_wrap(~ year)
+```
+
+
+### Scup
+```{r echo=FALSE}
+ggplot() +
+  geom_sf(data = coast) +
+  geom_sf(data = survdat_sp[survdat_sp$svspp %in% c(143, 642) &
+                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
+          aes(color = log10(abundance))) +
+  scale_color_viridis_c() +
+  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+  facet_wrap(~ year)
+```
+
