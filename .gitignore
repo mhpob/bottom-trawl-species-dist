@@ -3,3 +3,10 @@
 .Rproj.user
 
 /data
+
+# Big derived shapefile
+compiled_bottom_type*
+
+# Compiled notbooks/reports
+notebooks/*.pdf
+notebooks/*.html
