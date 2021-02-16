@@ -1,167 +1,292 @@
 ---
-title: "Untitled"
-output: html_document
+title: "Species selection"
+author: "Mike O'Brien"
+date: '2021-02-16'
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 4
+editor_options: 
+  markdown: 
+    wrap: 72
+bibliography: references.bib
 ---
 
-```{r}
-library(data.table)
-load('data/noaa_edab_survdat.rdata')
-
-setnames(survdat, tolower)
-
-# Drop length and sex
-survdat[, c('length', 'numlen', 'catchsex') := NULL]
-
-# Unique info by trawl
-survdat <- unique(survdat, by = c('cruise6', 'station', 'stratum', 'tow', 'svspp'))
-
-strat_key <- fread(list.files('data', 'STRATA', recursive = T, full.names = T))
-
-strat_key <- strat_key[grepl('MAB', stratum_name)]
-
-survdat <- survdat[stratum %in% strat_key$stratum]
-
-
-species_list <- fread(input = 'data/svdbs_supporttables/svdbs_svspecies_list.csv',
-                      col.names = tolower,
-                      fill = T
-                      )
-
-# Quick data cleaning
-species_list[!grepl('^\\d', svspp), ':='(
-  comname = paste(comname, svspp, v1),
-  svspp = v2)]
-species_list[, c('v1', 'v2') := NULL]
-species_list[, svspp := as.numeric(svspp)]
-species_list[, c('sciname', 'comname') := lapply(.SD, tolower), .SDcols = c('sciname', 'comname')]
-survdat <- species_list[survdat, on = 'svspp']
-
-
-
-numbers <- survdat[, lapply(.SD, sum, na.rm  = T),
-                   .SDcols = c('abundance', 'biomass'),
-                   by = 'comname']
-numbers <- numbers[survdat[, .N, by = 'comname'], on = 'comname']
-
-numbers[, ':='(rank_n = frank(-N),
-               rank_abun = frank(-abundance),
-               rank_bio = frank(-biomass))]
-numbers[, mn_rank := (rank_n + rank_abun + rank_bio) / 3]
-
-numbers[order(mn_rank)][1:10]
-
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  dev = 'ragg_png'
+)
 ```
 
+## Goals
+
+-   Find key demersal fish species caught in the NEFSC bottom trawl
+    surveys within the Mid-Atlantic Bight and Southern New England
+    strata
+
+-   Visualize the distribution of the above species
+
+-   Visualize the distribution of species noted in @rose2018 concept
+    paper for Lenfest
+
+    -   summer flounder
+    -   black sea bass
+    -   scup
+
+-   Utilizing one of the above key species, dip toe into species
+    distribution modeling
+
+## Key species within the MAB/SNE
+
+The NEFSC bottom trawl survey is divvied up into strata. I'm going to
+select those strata in what I think of as the "Mid-Atlantic Bight":
+strata that are designated as from the mid-Atlantic or southern New
+England:
+
+```{r echo=FALSE, message=FALSE}
+library(data.table)
+
+strata_info <- fread('data/svdbs_supporttables/svdbs_svmstrata.csv')
+
+library(sf); library(dplyr)
+strata <- read_sf('data/mapping/strata/strata.shp') %>% 
+  left_join(strata_info, by = c('STRATA' = 'stratum'))
 
 
-```{r}
+coast <- read_sf('data derived/mapping/coast_crop.shp') %>% 
+  st_transform(st_crs(strata))
+
+
 library(ggplot2)
 
-
-
+ggplot() + 
+  geom_sf(data = coast) +
+  geom_sf(data = strata,
+          aes(color = case_when(grepl('MAB', stratum_name) ~ 'MAB',
+                                grepl('SNE', stratum_name) ~ 'SNE',
+                                T ~ 'Other'))) +
+  coord_sf(xlim = c(-80, -65), ylim = c(32, 45)) +
+  labs(color = NULL) +
+  theme_bw() +
+  theme(legend.position = c(0.8, 0.3))
 ```
 
-rose et al proposal
-  summer flounder
-  black sea bass
-  scup
-  
-others
-  croaker
-  spot
-  little skate
-  
-```{r}
-library(sf)
-coast <- read_sf('data/mapping/natural earth')
+In the MAB/SNE, the top 10 species according to incidence, abundance, or
+biomass are:
 
-load('data/noaa_edab_survdat.rdata')
+```{r echo=FALSE}
+survdat <- fread('data derived/survdat_names_sed.csv')
 
-setnames(survdat, tolower)
 
-# Drop length and sex
-survdat[, c('length', 'numlen', 'catchsex') := NULL]
+n_mab_sne <- survdat[stratum %in% strata_info[grepl('MAB|SNE', stratum_name)]$stratum]
+n_mab_sne <- n_mab_sne[, lapply(.SD, sum, na.rm  = T),
+                       .SDcols = c('abundance', 'biomass'),
+                       by = 'comname']
+n_mab_sne <- n_mab_sne[survdat[, .N, by = 'comname'], on = 'comname']
 
-# Unique info by trawl
-survdat <- unique(survdat, by = c('cruise6', 'station', 'stratum', 'tow', 'svspp'))
-survdat <- species_list[survdat, on = 'svspp']
+n_mab_sne[, ':='(rank_incid = frank(-N),
+                 rank_abun = frank(-abundance),
+                 rank_bio = frank(-biomass))]
+n_mab_sne[, mn_rank := (rank_incid + rank_abun + rank_bio) / 3]
 
-survdat_sp <- st_as_sf(survdat,
+n_mab_sne[order(mn_rank), .(comname, rank_incid, rank_abun, rank_bio)][
+  rank_incid < 10 | rank_abun < 10 | rank_bio < 10]
+```
+
+Of those species, the following are demersal according to
+[FishBase](http://fishbase.org/):
+
+-   little skate
+-   silver hake
+-   winter skate
+-   red hake
+-   scup
+-   haddock
+-   weakfish
+-   Atlantic croaker
+-   smooth dogfish
+-   American lobster (though not a fish)
+-   American plaice
+
+If we limit the search to "MAB"-designated strata (i.e., those south of
+Hudson Canyon and north of Cape Hatteras), our top-10 species are:
+
+```{r echo=FALSE}
+n_mab <- survdat[stratum %in% strata_info[grepl('MAB', stratum_name)]$stratum]
+n_mab <- n_mab[, lapply(.SD, sum, na.rm  = T),
+               .SDcols = c('abundance', 'biomass'),
+               by = 'comname']
+n_mab <- n_mab[survdat[, .N, by = 'comname'], on = 'comname']
+
+n_mab[, ':='(rank_incid = frank(-N),
+             rank_abun = frank(-abundance),
+             rank_bio = frank(-biomass))]
+n_mab[, mn_rank := (rank_incid + rank_abun + rank_bio) / 3]
+
+n_mab[order(mn_rank), .(comname, rank_incid, rank_abun, rank_bio)][
+  rank_incid < 10 | rank_abun < 10 | rank_bio < 10]
+```
+
+Of those species, the following are demersal:
+
+-   little skate
+-   spotted hake
+-   northern searobin
+-   silver hake
+-   scup
+-   weakfish
+-   smooth dogfish
+-   Atlantic croaker
+-   red hake
+-   winter skate
+-   bluntnose stingray
+-   American lobster (though, again, not a fish)
+-   haddock
+-   American plaice
+
+others croaker spot little skate
+
+## Spatial distribution
+
+```{r echo=FALSE}
+survdat_sp <- st_as_sf(survdat[comname %in%
+                                 c(n_mab[rank_incid < 10 | rank_abun < 10 | rank_bio < 10, comname],
+                                  c('summer flounder', 'black sea bass', 'scup'))&
+                                 abundance > 0],
                        coords = c('lon', 'lat'),
-                       crs = 4326)
+                       crs = 4326) %>% 
+  st_transform(st_crs(strata))
 
+all_plots <- function(species){
+  plot_func <- function(species, season, type){
+    ggplot() +
+      geom_sf(data = coast) +
+      geom_sf(data = survdat_sp[survdat_sp$comname == species &
+                                  survdat_sp$year %in% seq(1963, 2019, by = 5) &
+                                  survdat_sp$season == toupper(season),],
+              aes_(color = as.name(type))) +
+      scale_color_viridis_c(name = paste0(toupper(substr(type, 1, 1)),
+                                 tolower(substr(type, 2, nchar(type)))), 
+                            trans = 'log10') +
+      coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
+      labs(title = paste(paste0(toupper(substr(species, 1, 1)),
+                                 tolower(substr(species, 2, nchar(species)))),
+                          paste0(type, ':'),
+                          tolower(season),
+                          'trawls', sep = ' ')) +
+      facet_wrap(~ year)
+  }
+  
+  print(plot_func(species, 'spring', 'abundance'))
+  
+  print(plot_func(species, 'fall', 'abundance'))
+
+  print(plot_func(species, 'spring', 'biomass'))
+
+  print(plot_func(species, 'fall', 'biomass'))
+  
+}
 ```
 
-### Atlantic croaker
+### Species noted in @rose2018 Lenfest concept paper
+
+#### Summer flounder
+
+```{r echo=FALSE, warning=FALSE}
+all_plots('summer flounder')
+```
+
+#### Black sea bass
+
+```{r echo=FALSE, warning=FALSE}
+all_plots('black sea bass')
+```
+
+#### Scup
+
+```{r echo=FALSE, warning=FALSE}
+all_plots('scup')
+```
+
+### Identified species
+
+#### Little skate
+
 ```{r echo=FALSE}
-ggplot() +
-  geom_sf(data = coast) +
-  geom_sf(data = survdat_sp[survdat_sp$svspp == 136 &
-                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
-          aes(color = log10(abundance))) +
-  scale_color_viridis_c() +
-  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
-  facet_wrap(~ year)
+all_plots('little skate')
 ```
 
-### Spot
+#### Spotted hake
+
 ```{r echo=FALSE}
-ggplot() +
-  geom_sf(data = coast) +
-  geom_sf(data = survdat_sp[survdat_sp$svspp == 149 &
-                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
-          aes(color = log10(abundance))) +
-  scale_color_viridis_c() +
-  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
-  facet_wrap(~ year)
+all_plots('spotted hake')
 ```
 
-### Little skate
+#### Northern searobin
+
 ```{r echo=FALSE}
-ggplot() +
-  geom_sf(data = coast) +
-  geom_sf(data = survdat_sp[survdat_sp$svspp == 26 &
-                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
-          aes(color = log10(abundance))) +
-  scale_color_viridis_c() +
-  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
-  facet_wrap(~ year)
+all_plots('northern searobin')
 ```
 
-### Summer flounder
+#### Silver hake
+
 ```{r echo=FALSE}
-ggplot() +
-  geom_sf(data = coast) +
-  geom_sf(data = survdat_sp[survdat_sp$svspp == 103 &
-                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
-          aes(color = log10(abundance))) +
-  scale_color_viridis_c() +
-  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
-  facet_wrap(~ year)
+all_plots('silver hake')
 ```
 
-### Black sea bass
+#### Weakfish
+
 ```{r echo=FALSE}
-ggplot() +
-  geom_sf(data = coast) +
-  geom_sf(data = survdat_sp[survdat_sp$svspp == 141 &
-                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
-          aes(color = log10(abundance))) +
-  scale_color_viridis_c() +
-  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
-  facet_wrap(~ year)
+all_plots('weakfish')
 ```
 
+#### Smooth dogfish
 
-### Scup
 ```{r echo=FALSE}
-ggplot() +
-  geom_sf(data = coast) +
-  geom_sf(data = survdat_sp[survdat_sp$svspp %in% c(143, 642) &
-                              survdat_sp$year %in% seq(1963, 2019, by = 5),],
-          aes(color = log10(abundance))) +
-  scale_color_viridis_c() +
-  coord_sf(xlim = c(-76.5, -67), ylim = c(35, 43)) +
-  facet_wrap(~ year)
+all_plots('smooth dogfish')
 ```
 
+#### Atl. croaker
+
+```{r echo=FALSE}
+all_plots('atlantic croaker')
+```
+
+#### Red hake
+
+```{r echo=FALSE}
+all_plots('red hake')
+```
+
+#### Winter skate
+
+```{r echo=FALSE}
+all_plots('winter skate')
+```
+
+#### Bluntnose stingray
+
+```{r echo=FALSE}
+all_plots('bluntnose stingray')
+```
+
+#### American lobster
+
+```{r echo=FALSE}
+all_plots('american lobster')
+```
+
+#### Haddock
+
+```{r echo=FALSE}
+all_plots('haddock')
+```
+
+#### American plaice
+
+```{r echo=FALSE}
+all_plots('american plaice')
+```
+
+## References
