@@ -6,20 +6,17 @@ output:
   pdf_document:
     toc: true
     toc_depth: 4
-editor_options: 
-  markdown: 
-    wrap: 72
 bibliography: references.bib
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = FALSE, warning = FALSE, message = FALSE,
-  dev = 'ragg_png'
+  dev = "png"
 )
 ```
 
-## Goals
+## Goals of this document
 
 -   Find key demersal fish species caught in the NEFSC bottom trawl
     surveys within the Mid-Atlantic Bight and Southern New England
@@ -33,9 +30,6 @@ knitr::opts_chunk$set(
     -   summer flounder
     -   black sea bass
     -   scup
-
--   Utilizing one of the above key species, dip toe into species
-    distribution modeling
 
 ## Key species within the MAB/SNE
 
@@ -144,8 +138,6 @@ Of those species, the following are demersal:
 -   American lobster (though, again, not a fish)
 -   haddock
 -   American plaice
-
-others croaker spot little skate
 
 ## Spatial distribution
 
