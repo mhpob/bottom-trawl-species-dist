@@ -1,0 +1,248 @@
+---
+title: "First blush at species distribution modeling"
+author: "Mike O'Brien"
+date: 'Week of 2021-02-15'
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 4
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  dev = "png"
+)
+```
+
+## Goals of this document
+
+-   Begin species distribution modeling (SDM)
+-   Utilize Atlantic croaker as the model species
+-   Start with GAMMs (what I'm most familiar with), move to those metrics used in the [`sdm`](https://cran.r-project.org/web/packages/sdm/index.html) [@naimi2016], [`dismo`](https://cran.r-project.org/web/packages/dismo/index.html), and [`biomod2`](https://github.com/biomodhub/biomod2) [@thuiller2009] R packages
+
+## Atlantic croaker distribution
+
+As a reminder, here are all the trawls that dragged up a croaker through the years:
+
+```{r}
+library(ggplot2); library(sf); library(data.table)
+
+coast <- read_sf('data derived/mapping/coast_crop.shp') %>% 
+  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+croaker <- fread('data derived/survdat_names_sed.csv')
+croaker <- croaker[comname == 'atlantic croaker']
+croaker <- unique(croaker, by = c('cruise6', 'station', 'stratum', 'tow'))
+
+croaker <- st_as_sf(croaker,
+                    coords = c('lon', 'lat'),
+                    remove = F,
+                    crs = 4326) %>% 
+  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_sf(data = croaker, alpha = 0.5) +
+  theme_minimal()
+```
+
+And here they are split out according to time (and unfortunately over-plotted):
+
+```{r}
+setDT(croaker)[, cut_7y := cut(year, seq(1963, 2019, 7))]
+croaker[, color.index := as.factor((year - 1963) %% 7)]
+
+ggplot() + 
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_sf(data = croaker, aes(geometry = geometry, color = color.index),
+                              alpha = 0.3) +
+  labs(color = 'Year in interval') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+
+```
+
+## Restricting the model bounds
+
+I'm going to restrict the data we're using to the MAB/SNE strata (pink), though this may change in the future if we choose to not explicitly include space in the models.
+
+```{r}
+strata_info <- fread('data/svdbs_supporttables/svdbs_svmstrata.csv')
+
+strata <- read_sf('data/mapping/strata/strata.shp')
+setDT(strata)
+
+strata <- strata[strata_info, on = c('STRATA' = 'stratum')]
+strata <- strata[grepl('MAB|SNE', stratum_name)]
+strata[, geometry :=
+         st_transform(geometry, crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')]
+
+strata <- strata[, .(geometry = st_union(geometry))]
+
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+    geom_sf(data = croaker, aes(geometry = geometry)) +
+  geom_sf(data = strata, aes(geometry = geometry),
+          fill = 'pink', alpha = 0.5) +
+  theme_minimal()
+```
+
+This inclusion rule causes the sites below to be dropped or selected. Note that we are dropping some sited that are located within Delaware Bay, which tends to be an Atlantic croaker hot spot.
+
+```{r}
+croaker[, selected := as.vector(st_intersects(geometry,
+                                                 strata$geometry,
+                                                 sparse = F))]
+croaker[, selected := fifelse(selected, 'Selected', 'Dropped')]
+
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+    geom_sf(data = strata, aes(geometry = geometry),
+          fill = 'pink', alpha = 0.5) +
+    geom_sf(data = croaker, aes(geometry = geometry)) +
+
+  facet_wrap(~ selected) +
+  theme_minimal()
+```
+
+Below is the distribution of croaker within the MAB/SNE strata, summed within 7 year blocks. This is the data I'll be using for the model (though the actual observations, not summed within blocks).
+
+```{r}
+yrly7 <- croaker[selected == 'Selected', 
+                 .(abundance = sum(abundance, na.rm = T),
+                   x = mean(st_coordinates(geometry)[,1]),
+                   y = mean(st_coordinates(geometry)[,2])),
+                 by = c('station', 'stratum', 'tow', 'cut_7y')]
+
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_point(data = yrly7, aes(x = x, y = y, color = abundance)) +
+  coord_sf(xlim = c(-2e5, 2.1e5), ylim = c(3.6e6, 4.35e6)) +
+  scale_color_viridis_c(trans = 'log10') +
+  labs(x = NULL, y = NULL, color = 'Abundance') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+```
+
+## GAMM
+
+### Model mesh
+
+I'm not an [R-INLA](https://www.r-inla.org/) expert. In fact, I'm pretty well set in the novice category -- most of my modeling experience leverages the [`lme4`](https://github.com/lme4/lme4) package for GLMMs and the [`mgcv`](https://cran.r-project.org/web/packages/mgcv/index.html) package for GAMMs. Luckily, @miller2020 outline a way to cross the boundary between `INLA` and `mgcv` and account for spatial correlation by fitting a stochastic partial differential equation (SPDE) as a smooth. They also do the hard work of coding the smooth, so thank you to them.
+
+Without further ado, here's the mesh:
+
+```{r}
+strata[, geometry := st_simplify(geometry,
+                                 preserveTopology = F,
+                                 dTolerance = 5000)]
+
+library(INLA)
+
+boundary <- inla.sp2segment(as_Spatial(strata$geometry))
+# make mesh using meshbuilder 'cause it's finnicky
+# meshbuilder()
+
+mesh <- inla.mesh.2d(boundary=boundary,
+                     max.edge=c(22000, 108000),
+                     min.angle=c(30, 21),
+                     
+                     ## Safeguard against large meshes.
+                     max.n=c(48000, 16000),
+                     
+                     ## Don't build a huge mesh!
+                     max.n.strict=c(128000, 128000),
+                     
+                     ## Filter away adjacent points.
+                     cutoff=8000,
+                     offset=c(1000, 55000))
+
+plot(mesh, asp = 1)
+```
+
+### Model fitting
+
+To start simple, I'm going to fit a basic model of the following form:
+
+$$
+Abundance = \beta_0 + \beta_{season} + f(bottom temperature) + f(Longitude, Latitude) + \beta_{year}
+$$
+
+where $\beta_0$ is the intercept, $\beta_{season}$ is the effect of season, $f(bottom temperature)$ is a smoothed effect of bottom temperature, $f(Longitude, Latitude)$ is as smoothed effect of space using the mesh above, and $\beta_{year}$ is a random intercept of year.
+
+Rather than run variable selection (there aren't many at the moment), I'm going to play with selection of the error family. I'll look at negative binomial, poisson, Tweedie, and zero-inflated Poisson. Here are the results of AIC:
+
+```{r}
+source("miller et al. supp/mgcv_spde_smooth.R") 
+
+abun <- readRDS('data derived/model output/bam_abun_bottemp_xy_yrran.RDS')
+lapply(abun, AIC)
+```
+
+I'm unsure if these AICs are comparable, but if they are then negative binomial is much more supported than the others. Judging by the fact that the other AICs are somewhat similar, this may be misleading.
+
+### Negative binomial visualization
+
+```{r}
+preds <- predict(abun$nb, type = 'terms', se = T, exclude = 'season')
+
+preds <- setDT(cbind(
+  abun$nb$model,
+  pred = exp(preds$fit),
+  lci = exp(preds$fit - 1.96 * preds$se.fit),
+  uci = exp(preds$fit + 1.96 * preds$se.fit)
+))
+
+
+ggplot(data = preds, aes(x = bottemp)) +
+  geom_ribbon(aes(ymin = `lci.s(bottemp)`, ymax = `uci.s(bottemp)`),
+              fill = 'lightgray') +
+  geom_line(aes(y = `pred.s(bottemp)`)) +
+  geom_rug() +
+  labs(x = 'Bottom temperature (°C)', y = 'Individuals',
+       title = 'Partial effect of bottom temperature') +
+  theme_bw()
+
+
+ggplot(data = preds, aes(x = yr_fac)) +
+  geom_pointrange(aes(y = `pred.s(yr_fac)`,
+                      ymin = `lci.s(yr_fac)`,
+                      ymax = `uci.s(yr_fac)`)) +
+  geom_rug() +
+  labs(x = NULL, y = 'Individuals',
+       title = 'Partial effect of year; I.I.D. random intercept') +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+
+coast <- st_read('data derived/mapping/coast_crop.shp') %>%
+  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+spat_dat <- melt(preds,
+                 id.vars = c('abundance','X','Y'),
+                 measure.vars = c('pred.s(X,Y)', 'lci.s(X,Y)', 'uci.s(X,Y)'))
+spat_dat[, variable := fcase(variable %like% 'pred', 'Predicted',
+                             variable %like% 'lci', 'Lower confidence interval',
+                             variable %like% 'uci', 'Upper confidence interval')]
+
+ggplot() +
+  geom_sf(data = coast) +
+  geom_point(data = spat_dat,
+             aes(x = X, y = Y, color = value)) +
+  coord_sf(xlim = c(-2e5, 2.1e5), ylim = c(3.6e6, 4.35e6)) +
+  scale_color_viridis_c() +
+  labs(x = NULL, y = NULL, color = NULL,
+       title = 'Atlantic croaker modeled abundance',
+       subtitle = 'Partial effect of X-Y space') +
+  facet_wrap(~variable) +
+  theme_minimal() +
+  theme(legend.position = c(0.9, 0.4))
+
+```
+
+## `sdm` 
+
+## References
