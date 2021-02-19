@@ -35,6 +35,7 @@ coast <- read_sf('data derived/mapping/coast_crop.shp') %>%
 croaker <- fread('data derived/survdat_names_sed.csv')
 croaker <- croaker[comname == 'atlantic croaker']
 croaker <- unique(croaker, by = c('cruise6', 'station', 'stratum', 'tow'))
+croaker <- croaker[complete.cases(croaker[, .(season, bottemp, year, lat, lon)])]
 
 croaker <- st_as_sf(croaker,
                     coords = c('lon', 'lat'),
@@ -178,6 +179,12 @@ Rather than run variable selection (there aren't many at the moment), I'm going 
 ```{r}
 source("miller et al. supp/mgcv_spde_smooth.R") 
 
+library(mgcv)
+
+croaker[, ':='(yr_fac = as.character(year),
+               X = st_coordinates(geometry)[, 1],
+               Y = st_coordinates(geometry)[, 2])]
+
 abun <- readRDS('data derived/model output/bam_abun_bottemp_xy_yrran.RDS')
 lapply(abun, AIC)
 ```
@@ -243,6 +250,33 @@ ggplot() +
 
 ```
 
-## `sdm` 
+### Cross validation
+
+```{r}
+new_data <- data.table(
+  season = c('FALL', 'SPRING'),
+  yr_fac = '2013',
+  bottemp = 5.73,
+  X = -117652.2,
+  Y = 3737641
+)
+
+preds <- predict(abun$nb,
+                 newdata = new_data,
+                 exclude = 's(yr_fac)',
+                 type = 'response',
+                 se.fit = T
+                 discrete = T,
+                 nthreads = parallel::detectCores(logical = F) - 1)
+
+preds <- setDT(cbind(
+  abun$nb$model,
+  pred = exp(preds$fit),
+  lci = exp(preds$fit - 1.96 * preds$se.fit),
+  uci = exp(preds$fit + 1.96 * preds$se.fit)
+))
+```
+
+
 
 ## References

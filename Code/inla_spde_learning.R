@@ -43,6 +43,7 @@ plot(mesh, asp = 1)
 survdat <- fread('data derived/survdat_names_sed.csv')
 subs <- survdat[comname == 'atlantic croaker']
 subs <- unique(subs, by = c('cruise6', 'station', 'stratum', 'tow'))
+subs <- subs[complete.cases(subs[, .(season, bottemp, year, lat, lon)])]
 subs[, yr_fac := as.factor(year)]
 subs <- st_as_sf(subs, coords = c('lon', 'lat'), crs = 4326)
 subs <- setDT(subs)[, geometry := st_transform(geometry, crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')]
@@ -53,63 +54,63 @@ subs <- cbind(subs, st_coordinates(subs$geometry))
 subs <- subs[as.vector(st_intersects(geometry, strata$geometry, sparse = F))]
 
 
-mod_tw <- bam(biomass ~ season + s(bottemp) +
-             s(yr_fac, bs = 're') +
-             s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-           data = subs[year < 2014], family = tw(),
-           control =  gam.control(scalePenalty = FALSE),
-           discrete = T, nthreads = 11)
+# Biomass
+# mod_tw <- bam(biomass ~ season + s(bottemp) +
+#              s(yr_fac, bs = 're') +
+#              s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+#            data = subs[year < 2014], family = tw(),
+#            control =  gam.control(scalePenalty = FALSE),
+#            discrete = T, nthreads = 11)
+#
+# mod_nb <- bam(biomass ~ season + s(bottemp) +
+#                 s(yr_fac, bs = 're') +
+#                 s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+#               data = subs[year < 2014], family = nb(),
+#               control =  gam.control(scalePenalty = FALSE),
+#               discrete = T, nthreads = 11)
 
-mod_nb <- bam(biomass ~ season + s(bottemp) +
-                s(yr_fac, bs = 're') +
-                s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-              data = subs[year < 2014], family = nb(),
-              control =  gam.control(scalePenalty = FALSE),
-              discrete = T, nthreads = 11)
+# Abundance
+mod_tw_abun_no921 <- bam(abundance ~ season + s(bottemp) +
+                 s(yr_fac, bs = 're') +
+                 s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+               data = subs[year <= 2014][-921], family = tw(),
+               control =  gam.control(scalePenalty = FALSE),
+               discrete = T, nthreads = 11)
 
+mod_poi_abun <- bam(abundance ~ season + s(bottemp) +
+                     s(yr_fac, bs = 're') +
+                     s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                   data = subs[year <= 2014], family = poisson(),
+                   control =  gam.control(scalePenalty = FALSE),
+                   discrete = T, nthreads = 11)
 
-# mod_tw_abun <- bam(abundance ~ season + s(bottemp) +
-#                  s(yr_fac, bs = 're') +
-#                  s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-#                data = subs[year < 2014], family = tw(),
-#                control =  gam.control(scalePenalty = FALSE),
-#                discrete = T, nthreads = 11)
-#
-# mod_poi_abun <- bam(abundance ~ season + s(bottemp) +
-#                      s(yr_fac, bs = 're') +
-#                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-#                    data = subs[year < 2014], family = poisson(),
-#                    control =  gam.control(scalePenalty = FALSE),
-#                    discrete = T, nthreads = 11)
-#
-#
-# mod_nb_abun <- bam(abundance ~ season + s(bottemp) +
-#                       s(yr_fac, bs = 're') +
-#                       s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-#                     data = subs[year < 2014], family = nb(),
-#                     control =  gam.control(scalePenalty = FALSE),
-#                     discrete = T, nthreads = 11)
-#
-#
-# mod_zip_abun <- bam(abundance ~ season + s(bottemp) +
-#                      s(yr_fac, bs = 're') +
-#                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-#                    data = subs[year < 2014], family = ziP(),
-#                    control =  gam.control(scalePenalty = FALSE),
-#                    discrete = T, nthreads = 11)
+mod_nb_abun <- bam(abundance ~ season + s(bottemp) +
+                      s(yr_fac, bs = 're') +
+                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                    data = subs[year <= 2014], family = nb(),
+                    control =  gam.control(scalePenalty = FALSE),
+                    discrete = T, nthreads = 11)
+
+mod_zip_abun <- bam(abundance ~ season + s(bottemp) +
+                     s(yr_fac, bs = 're') +
+                     s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                   data = subs[year <= 2014], family = ziP(),
+                   control =  gam.control(scalePenalty = FALSE),
+                   discrete = T, nthreads = 11)
 #
 # abun <- list(nb = mod_nb_abun,
 #              poi = mod_poi_abun,
 #              tw = mod_tw_abun,
 #              zip = mod_zip_abun)
-#
+# #
 # saveRDS(abun, 'data derived/model output/bam_abun_bottemp_xy_yrran.RDS')
 
 
 abun <- readRDS('data derived/model output/bam_abun_bottemp_xy_yrran.RDS')
 lapply(abun, AIC)
 
-k <- predict(abun$nb, type = 'terms', se = T, exclude = 'season')
+k <- predict(abun$nb, newdata = abun$nb$model[1:15,], type = 'response', se = T,
+             exclude = 'season')
 
 kk <- setDT(cbind(
   abun$nb$model,
@@ -171,4 +172,54 @@ ggplot() +
   facet_wrap(~variable) +
   theme_minimal() +
   theme(legend.position = c(0.9, 0.4))
+
+
+
+## Cross validation ----
+mod <- mod_nb_abun
+
+subs <- subs[complete.cases(subs[, .(abundance, season, bottemp, X, Y)])]
+
+run1 <- subs[year == 2015
+             ]
+
+# need to have a factor level that was in the model fitting
+run1[, yr_fac := '1967']
+
+# If the subset has only 1 of "FALL" or "SPRING", predict() won't work.
+if(length(unique(run1$season)) == 1){
+  run1 <- rbind(run1, run1[1])
+  run1[nrow(run1), season :=
+         c('SPRING', 'FALL')[!c('SPRING', 'FALL') %in% unique(run1$season)]]
+  run1[, dummy := T]
+}
+
+
+preds <- predict(mod, newdata = run1, type = 'link',
+                 exclude = 's(yr_fac)')
+
+run1 <- setDT(cbind(
+  run1,
+  pred = preds
+))
+
+if('dummy' %in% names(run1)){
+  run1[-nrow(run1)]
+}
+
+run1[, .(rmse = sqrt(mean((abundance - pred)^2)),
+         prop_max = sqrt(mean((abundance - pred)^2)) / max(abundance),
+         fold = 'fold1'),
+     by = abundance > 0]
+
+
+
+mod_nb_cv <- bam(abundance ~ season + s(bottemp) +
+                   s(yr_fac, bs = 're') +
+                   s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                 data = subs[year <= 2015], family = nb(),
+                 control =  gam.control(scalePenalty = FALSE),
+                 discrete = T, nthreads = 11)
+
+
 
