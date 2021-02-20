@@ -55,14 +55,14 @@ subs <- subs[as.vector(st_intersects(geometry, strata$geometry, sparse = F))]
 
 
 # Biomass
-# mod_tw <- bam(biomass ~ season + s(bottemp) +
+# mod_tw <- bam(biomass ~ season + s(bottemp, bs = 'cr) +
 #              s(yr_fac, bs = 're') +
 #              s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
 #            data = subs[year < 2014], family = tw(),
 #            control =  gam.control(scalePenalty = FALSE),
 #            discrete = T, nthreads = 11)
 #
-# mod_nb <- bam(biomass ~ season + s(bottemp) +
+# mod_nb <- bam(biomass ~ season + s(bottemp, bs = 'cr') +
 #                 s(yr_fac, bs = 're') +
 #                 s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
 #               data = subs[year < 2014], family = nb(),
@@ -70,28 +70,28 @@ subs <- subs[as.vector(st_intersects(geometry, strata$geometry, sparse = F))]
 #               discrete = T, nthreads = 11)
 
 # Abundance
-mod_tw_abun_no921 <- bam(abundance ~ season + s(bottemp) +
+mod_tw_abun <- bam(abundance ~ season + s(bottemp, bs = 'cr') +
                  s(yr_fac, bs = 're') +
                  s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
-               data = subs[year <= 2014][-921], family = tw(),
+               data = subs[year <= 2014], family = tw(),
                control =  gam.control(scalePenalty = FALSE),
                discrete = T, nthreads = 11)
 
-mod_poi_abun <- bam(abundance ~ season + s(bottemp) +
+mod_poi_abun <- bam(abundance ~ season + s(bottemp, bs = 'cr') +
                      s(yr_fac, bs = 're') +
                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
                    data = subs[year <= 2014], family = poisson(),
                    control =  gam.control(scalePenalty = FALSE),
                    discrete = T, nthreads = 11)
 
-mod_nb_abun <- bam(abundance ~ season + s(bottemp) +
+mod_nb_abun <- bam(abundance ~ season + s(bottemp, bs = 'cr') +
                       s(yr_fac, bs = 're') +
                       s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
                     data = subs[year <= 2014], family = nb(),
                     control =  gam.control(scalePenalty = FALSE),
                     discrete = T, nthreads = 11)
 
-mod_zip_abun <- bam(abundance ~ season + s(bottemp) +
+mod_zip_abun <- bam(abundance ~ season + s(bottemp, bs = 'cr') +
                      s(yr_fac, bs = 're') +
                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
                    data = subs[year <= 2014], family = ziP(),
@@ -214,7 +214,7 @@ run1[, .(rmse = sqrt(mean((abundance - pred)^2)),
 
 
 
-mod_nb_cv <- bam(abundance ~ season + s(bottemp) +
+mod_nb_cv <- bam(abundance ~ season + s(bottemp, bs = 'cr') +
                    s(yr_fac, bs = 're') +
                    s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
                  data = subs[year <= 2015], family = nb(),
