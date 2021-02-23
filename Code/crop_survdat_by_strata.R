@@ -39,4 +39,4 @@ all_data <- all_data[as.vector(st_intersects(geometry,
                                              sparse = F))]
 
 
-fwrite(all_data, 'survat_mabsne_only.csv')
+fwrite(all_data, 'data derived/survat_mabsne_only.csv')
