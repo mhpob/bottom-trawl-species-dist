@@ -15,4 +15,4 @@ notebooks/*.html
 survdat_names_sed.csv
 
 # Big model output
-bam_abun_bottemp_xy_yrran.RDS
+data derived/model output/*.RDS
