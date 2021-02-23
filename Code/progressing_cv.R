@@ -77,6 +77,7 @@ progressing_cv <- function(model, full_data, yr_seq){
 }
 
 
+
 j <- progressing_cv(mod, subs, 2015:2019)
 
 saveRDS(j, 'data derived/model output/nb_bam_abun_progcv.rds')

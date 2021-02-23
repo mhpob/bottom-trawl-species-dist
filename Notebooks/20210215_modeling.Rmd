@@ -12,7 +12,7 @@ bibliography: references.bib
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = FALSE, warning = FALSE, message = FALSE,
-  dev = "png"
+  dev = "png", dpi = 144
 )
 ```
 
@@ -20,11 +20,12 @@ knitr::opts_chunk$set(
 
 -   Begin species distribution modeling (SDM)
 -   Utilize Atlantic croaker as the model species
--   Start with GAMMs (what I'm most familiar with), move to those metrics used in the [`sdm`](https://cran.r-project.org/web/packages/sdm/index.html) [@naimi2016], [`dismo`](https://cran.r-project.org/web/packages/dismo/index.html), and [`biomod2`](https://github.com/biomodhub/biomod2) [@thuiller2009] R packages
+-   Start with GAMMs (what I'm most familiar with)
+-   Unfortunately, metrics used in the [`sdm`](https://cran.r-project.org/web/packages/sdm/index.html) [@naimi2016], [`dismo`](https://cran.r-project.org/web/packages/dismo/index.html), and [`biomod2`](https://github.com/biomodhub/biomod2) [@thuiller2009] R packages are not working for me at the moment. Work in the future will use these.
 
 ## Atlantic croaker distribution
 
-As a reminder, here are all the trawls that dragged up a croaker through the years:
+Here are all the trawls that dragged up a croaker through the years:
 
 ```{r}
 library(ggplot2); library(sf); library(data.table)
@@ -32,10 +33,20 @@ library(ggplot2); library(sf); library(data.table)
 coast <- read_sf('data derived/mapping/coast_crop.shp') %>% 
   st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
 
-croaker <- fread('data derived/survdat_names_sed.csv')
-croaker <- croaker[comname == 'atlantic croaker']
-croaker <- unique(croaker, by = c('cruise6', 'station', 'stratum', 'tow'))
-croaker <- croaker[complete.cases(croaker[, .(season, bottemp, year, lat, lon)])]
+all_data <- fread('data derived/survdat_names_sed.csv')
+
+station_key <- unique(all_data,
+                      by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season'))
+station_key[, 18:25 := NULL]
+
+croaker <- all_data[comname == 'atlantic croaker']
+croaker <- croaker[station_key, on = names(station_key)]
+croaker <- unique(croaker, by = c('cruise6', 'station', 'stratum', 'tow',
+                                  'year', 'season'))
+
+
+croaker[, abundance := fifelse(is.na(abundance), 0, abundance)]
 
 croaker <- st_as_sf(croaker,
                     coords = c('lon', 'lat'),
@@ -46,7 +57,7 @@ croaker <- st_as_sf(croaker,
 
 ggplot() +
   geom_sf(data = coast, color = 'lightgray') +
-  geom_sf(data = croaker, alpha = 0.5) +
+  geom_sf(data = croaker[croaker$abundance > 0,], alpha = 0.5) +
   theme_minimal()
 ```
 
@@ -58,8 +69,9 @@ croaker[, color.index := as.factor((year - 1963) %% 7)]
 
 ggplot() + 
   geom_sf(data = coast, color = 'lightgray') +
-  geom_sf(data = croaker, aes(geometry = geometry, color = color.index),
-                              alpha = 0.3) +
+  geom_sf(data = croaker[abundance > 0],
+          aes(geometry = geometry, color = color.index),
+          alpha = 0.3) +
   labs(color = 'Year in interval') +
   facet_wrap(~ cut_7y, ncol = 4) +
   theme_minimal()
@@ -85,7 +97,7 @@ strata <- strata[, .(geometry = st_union(geometry))]
 
 ggplot() +
   geom_sf(data = coast, color = 'lightgray') +
-    geom_sf(data = croaker, aes(geometry = geometry)) +
+    geom_sf(data = croaker[abundance > 0], aes(geometry = geometry)) +
   geom_sf(data = strata, aes(geometry = geometry),
           fill = 'pink', alpha = 0.5) +
   theme_minimal()
@@ -103,7 +115,7 @@ ggplot() +
   geom_sf(data = coast, color = 'lightgray') +
     geom_sf(data = strata, aes(geometry = geometry),
           fill = 'pink', alpha = 0.5) +
-    geom_sf(data = croaker, aes(geometry = geometry)) +
+    geom_sf(data = croaker[abundance > 0], aes(geometry = geometry)) +
 
   facet_wrap(~ selected) +
   theme_minimal()
@@ -120,7 +132,7 @@ yrly7 <- croaker[selected == 'Selected',
 
 ggplot() +
   geom_sf(data = coast, color = 'lightgray') +
-  geom_point(data = yrly7, aes(x = x, y = y, color = abundance)) +
+  geom_point(data = yrly7[abundance > 0], aes(x = x, y = y, color = abundance)) +
   coord_sf(xlim = c(-2e5, 2.1e5), ylim = c(3.6e6, 4.35e6)) +
   scale_color_viridis_c(trans = 'log10') +
   labs(x = NULL, y = NULL, color = 'Abundance') +
@@ -128,9 +140,25 @@ ggplot() +
   theme_minimal()
 ```
 
+## Variable selection
+
+Unfortunately, not all variables were recorded at every trawl. If we'd like to include variables such as surface and bottom salinity, we'll have to restrict things to after 1992. For now, I'm going to avoid those variables to keep the longest time series possible.
+
+```{r}
+obs <- station_key[, lapply(.SD, function(.) sum(!is.na(.))/ length(.)),
+                   by = c('year', 'season'), .SDcols = c(11, 13:17)]
+obs <- melt(obs, id.vars = c('year', 'season'))
+
+ggplot(data = obs) +
+  geom_line(aes(x = year, y = value, color = season)) +
+  facet_wrap(~ variable) +
+  labs(y = 'Proportion of records available') +
+  theme_bw()
+```
+
 ## GAMM
 
-### Model mesh
+### Spatial autocorrelation (model mesh)
 
 I'm not an [R-INLA](https://www.r-inla.org/) expert. In fact, I'm pretty well set in the novice category -- most of my modeling experience leverages the [`lme4`](https://github.com/lme4/lme4) package for GLMMs and the [`mgcv`](https://cran.r-project.org/web/packages/mgcv/index.html) package for GAMMs. Luckily, @miller2020 outline a way to cross the boundary between `INLA` and `mgcv` and account for spatial correlation by fitting a stochastic partial differential equation (SPDE) as a smooth. They also do the hard work of coding the smooth, so thank you to them.
 
@@ -169,12 +197,29 @@ plot(mesh, asp = 1)
 To start simple, I'm going to fit a basic model of the following form:
 
 $$
-Abundance = \beta_0 + \beta_{season} + f(bottom temperature) + f(Longitude, Latitude) + \beta_{year}
+Abundance = \beta_0 + \beta_{season} + \beta_{sediment} + f(bottom temperature) + f(Longitude, Latitude) + f(year)
 $$
 
-where $\beta_0$ is the intercept, $\beta_{season}$ is the effect of season, $f(bottom temperature)$ is a smoothed effect of bottom temperature, $f(Longitude, Latitude)$ is as smoothed effect of space using the mesh above, and $\beta_{year}$ is a random intercept of year.
+where $\beta_0$ is the intercept, $\beta_{season}$ is the effect of season, $\beta_{sediment}$ is the effect of sediment type, $f(bottom temperature)$ is a smoothed effect of bottom temperature, $f(Longitude, Latitude)$ is as smoothed effect of space using the mesh above, and $f(year)$ is a smoothed function of year.
 
-Rather than run variable selection (there aren't many at the moment), I'm going to play with selection of the error family. I'll look at negative binomial, poisson, Tweedie, and zero-inflated Poisson. Here are the results of AIC:
+I'm going to use all of the trawls available -- including those that did not observe a croaker -- after 1967 (the first year to record a croaker) up to and including 2014. 2015-2019 will be held out for testing. That will use all of these points:
+
+```{r}
+croaker <- croaker[complete.cases(croaker[, .(season, bottemp, grpsed,
+                                              year, lat, lon)]) &
+                     selected == 'Selected' &
+                     year >= 1967]
+
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_sf(data = croaker, aes(geometry = geometry), size = 0.1) +
+  geom_sf(data = strata, aes(geometry = geometry),
+          fill = 'pink', alpha = 0.9) +
+  coord_sf(xlim = c(-2e5, 4.5e5), ylim = c(3.6e6, 4.38e6)) +
+  theme_minimal()
+```
+
+Next, I'm going to play with selection of the error family. I'll look at negative binomial, poisson, Tweedie, and zero-inflated Poisson. Here are the results of AIC:
 
 ```{r}
 source("miller et al. supp/mgcv_spde_smooth.R") 
@@ -185,16 +230,24 @@ croaker[, ':='(yr_fac = as.character(year),
                X = st_coordinates(geometry)[, 1],
                Y = st_coordinates(geometry)[, 2])]
 
-abun <- readRDS('data derived/model output/bam_abun_bottemp_xy_yrran.RDS')
+abun <- readRDS('data derived/model output/bam_abun_bottemp_xy_yrran_with0_cryr.RDS')
 lapply(abun, AIC)
 ```
 
-I'm unsure if these AICs are comparable, but if they are then negative binomial is much more supported than the others. Judging by the fact that the other AICs are somewhat similar, this may be misleading.
+Negative binomial is much more supported than the others using AIC.
+
+### Negative binomial summary
+
+```{r}
+summary(abun$nb, re.test = F)
+```
+
+In the negative binomial model, it seems that the parametric effects of season and sediment group are non-significant. There is high deviance explained here, but that is almost definitely due to the number of zeroes in the data. Obviously, the R^2^ value here is nonsense, and likely suggests that we're missing some process in the model. When running a model on presence-only abundance, deviance explained is \~ 35% and R^2^ is 4.41%.
 
 ### Negative binomial visualization
 
 ```{r}
-preds <- predict(abun$nb, type = 'terms', se = T, exclude = 'season')
+preds <- predict(abun$nb, type = 'terms', se = T)
 
 preds <- setDT(cbind(
   abun$nb$model,
@@ -213,70 +266,99 @@ ggplot(data = preds, aes(x = bottemp)) +
        title = 'Partial effect of bottom temperature') +
   theme_bw()
 
+```
 
-ggplot(data = preds, aes(x = yr_fac)) +
-  geom_pointrange(aes(y = `pred.s(yr_fac)`,
-                      ymin = `lci.s(yr_fac)`,
-                      ymax = `uci.s(yr_fac)`)) +
-  geom_rug() +
+```{r}
+ggplot(data = preds, aes(x = year)) +
+  geom_ribbon(aes(ymin = `lci.s(year)`, ymax = `uci.s(year)`),
+              fill = 'lightgray') +
+  geom_line(aes(y = `pred.s(year)`)) +
   labs(x = NULL, y = 'Individuals',
-       title = 'Partial effect of year; I.I.D. random intercept') +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+       title = 'Partial effect of year') +
+  theme_bw()
+```
+
+```{r}
+grid <- st_make_grid(strata$geometry, cellsize = 10*1000)
+
+grid <- grid[st_covered_by(grid, strata$geometry, sparse = F) |
+                st_overlaps(grid, strata$geometry, sparse = F)]
+
+grid_pts <- st_centroid(grid)
+grid_pts <- data.table(X = st_coordinates(grid_pts)[,1],
+                       Y = st_coordinates(grid_pts)[,2],
+                       season = c('FALL', 'SPRING'),
+                       grpsed = c('Sand', 'Gravel'),
+                       bottemp = 20, year = 1973)
+
+spat_pred <- predict(abun$nb, grid_pts,
+                     type = 'terms', terms = 's(X,Y)', se = T,
+                     newdata.guaranteed = T)
+spat_pred <- data.table(
+  data.table(grid),
+  pred = exp(spat_pred$fit),
+  lci = exp(spat_pred$fit - 1.96 * spat_pred$se.fit),
+  uci = exp(spat_pred$fit + 1.96 * spat_pred$se.fit)
+)
 
 
-coast <- st_read('data derived/mapping/coast_crop.shp') %>%
-  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
-
-spat_dat <- melt(preds,
-                 id.vars = c('abundance','X','Y'),
+spat_pred <- melt(spat_pred,
+                 id.vars = 'grid',
                  measure.vars = c('pred.s(X,Y)', 'lci.s(X,Y)', 'uci.s(X,Y)'))
-spat_dat[, variable := fcase(variable %like% 'pred', 'Predicted',
+spat_pred[, variable := fcase(variable %like% 'pred', 'Predicted',
                              variable %like% 'lci', 'Lower confidence interval',
                              variable %like% 'uci', 'Upper confidence interval')]
 
 ggplot() +
+  geom_sf(data = spat_pred, aes(geometry = grid, fill = value), color = NA) +
   geom_sf(data = coast) +
-  geom_point(data = spat_dat,
-             aes(x = X, y = Y, color = value)) +
-  coord_sf(xlim = c(-2e5, 2.1e5), ylim = c(3.6e6, 4.35e6)) +
-  scale_color_viridis_c() +
-  labs(x = NULL, y = NULL, color = NULL,
+  coord_sf(xlim = c(-2e5, 4.2e5), ylim = c(3.6e6, 4.5e6)) +
+  scale_fill_viridis_c(trans = 'log10') +
+  labs(x = NULL, y = NULL, fill = NULL,
        title = 'Atlantic croaker modeled abundance',
        subtitle = 'Partial effect of X-Y space') +
   facet_wrap(~variable) +
   theme_minimal() +
   theme(legend.position = c(0.9, 0.4))
-
 ```
 
 ### Cross validation
 
+Since this takes a lot of computing time, cross validation was constructed "off screen". I ran 5-fold cross validation in two ways:
+
+1)  The "canonical" way for time series, where the model was
+
+    1.  fit with data up to 2014, then tested on 2015 observations
+    2.  fit with data up to 2015, then tested on 2016 observations
+    3.  fit with data up to 2016, then tested on 2017 observations
+    4.  and so on through 2018. This tests the model's predictive ability in the next year.
+
+2)  Fit the model with data up to 2014, then test this model on observations each year through 2019.
+
+    1.  This tests the model's predictive ability through five years in the future.
+
+#### Canonical cross validation
+
+The mean root-mean-square error of predicting the next year's abundance when catch was greater than zero was 815 individuals,. This was about 25% of each year's maximum value. When catch was 0, the model it it more-or-less bang on. This tells us that the zeroes are really in the driver's seat here.
+
 ```{r}
-new_data <- data.table(
-  season = c('FALL', 'SPRING'),
-  yr_fac = '2013',
-  bottemp = 5.73,
-  X = -117652.2,
-  Y = 3737641
-)
+cv <- fread('data derived/model output/canonical_cv_croaker_abun.csv')
 
-preds <- predict(abun$nb,
-                 newdata = new_data,
-                 exclude = 's(yr_fac)',
-                 type = 'response',
-                 se.fit = T
-                 discrete = T,
-                 nthreads = parallel::detectCores(logical = F) - 1)
-
-preds <- setDT(cbind(
-  abun$nb$model,
-  pred = exp(preds$fit),
-  lci = exp(preds$fit - 1.96 * preds$se.fit),
-  uci = exp(preds$fit + 1.96 * preds$se.fit)
-))
+cv[, .('RMSE of folds' = round(mean(rmse), 2),
+       'Pct. max' = round(median(prop_max) * 100, 0)),
+   by = 'abundance > 0']
 ```
 
+#### 5 year progressive cross validation
 
+Running 5-fold cross-validation in the second manner yields nearly identical results to the first. It seems that that the parameters within the model have stabilized using data up until 2014; additional data does not change the predictive error of the model.
+
+```{r}
+cv <- fread('data derived/model output/5yr_cv_croaker_abun.csv')
+
+cv[, .('RMSE of folds' = round(mean(rmse), 2),
+       'Pct. max' = round(median(prop_max) * 100, 0)),
+   by = 'abundance > 0']
+```
 
 ## References
