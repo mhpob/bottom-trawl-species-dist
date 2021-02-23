@@ -1,0 +1,40 @@
+---
+title: ""
+author: "Mike O'Brien"
+date: 'Week of 2021-02-22'
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 4
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  dev = "png", dpi = 144
+)
+```
+
+## Goals
+
+-   Add salinity and depth to GAMM
+-   Model black sea bass, scup, and summer flounder (species noted in @rose2018 concept paper)
+
+## Add salinity and depth to GAMM
+
+```{r}
+library(ggplot2); library(sf); library(data.table)
+
+all_data <- fread('data derived/survdat_mabsne_only.csv')
+
+station_key <- unique(all_data,
+                      by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season'))
+station_key[, 18:24 := NULL]
+
+croaker <- all_data[comname == 'atlantic croaker']
+croaker <- croaker[station_key, on = names(station_key)]
+```
+
+## References
