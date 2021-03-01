@@ -526,3 +526,161 @@ mod_bin <- bam(present ~ season + grpsed +
                    control =  gam.control(scalePenalty = FALSE),
                    discrete = T, nthreads = 11)
 
+
+# Include depth and salinity ---------------
+library(ggplot2); library(sf); library(data.table)
+
+all_data <- fread("data derived/survdat_mabsne_only.csv")
+
+station_key <- unique(all_data,
+                      by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season'))
+station_key[, 18:23 := NULL]
+
+croaker <- all_data[comname == 'atlantic croaker']
+
+croaker <- croaker[station_key, on = names(station_key)]
+
+croaker[, abundance := fifelse(is.na(abundance), 0, abundance)]
+
+croaker <- st_as_sf(croaker,
+                    coords = c('lon', 'lat'),
+                    remove = F,
+                    crs = 4326) %>%
+  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+croaker <- setDT(croaker)[complete.cases(croaker[, .(season, bottemp, botsalin,
+                                                     grpsed, year, depth,
+                                                     lat, lon)])]
+
+croaker[, ':='(X = st_coordinates(geometry)[, 1],
+               Y = st_coordinates(geometry)[, 2])]
+
+source("miller et al. supp/mgcv_spde_smooth.R")
+
+library(mgcv); library(INLA)
+strata_info <- fread('data/svdbs_supporttables/svdbs_svmstrata.csv')
+
+strata <- read_sf('data/mapping/strata/strata.shp')
+setDT(strata)
+
+strata <- strata[strata_info, on = c('STRATA' = 'stratum')]
+strata <- strata[grepl('MAB|SNE', stratum_name)]
+strata[, geometry :=
+         st_transform(geometry, crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')]
+
+strata <- strata[, .(geometry = st_union(geometry))]
+
+strata[, geometry := st_simplify(geometry,
+                                 preserveTopology = F,
+                                 dTolerance = 5000)]
+
+boundary <- inla.sp2segment(as_Spatial(strata$geometry))
+# make mesh using meshbuilder 'cause it's finnicky
+# meshbuilder()
+
+mesh <- inla.mesh.2d(boundary=boundary,
+                     max.edge=c(22000, 108000),
+                     min.angle=c(30, 21),
+
+                     ## Safeguard against large meshes.
+                     max.n=c(48000, 16000),
+
+                     ## Don't build a huge mesh!
+                     max.n.strict=c(128000, 128000),
+
+                     ## Filter away adjacent points.
+                     cutoff=8000,
+                     offset=c(1000, 55000))
+
+
+
+mod_tw_abun <- bam(abundance ~ season + grpsed +
+                     s(depth, bs = 'cr', k = 10) + s(botsalin, bs = 'cr', k = 10) +
+                     s(bottemp, bs = 'cr', k = 10) +
+                     s(year, bs = 'cr', k = 10) +
+                     s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                   data = croaker[year <= 2014], family = tw(),
+                   control =  gam.control(scalePenalty = FALSE),
+                   discrete = T, nthreads = 11)
+
+mod_poi_abun <- bam(abundance ~ season + grpsed +
+                      s(depth, bs = 'cr', k = 10) + s(botsalin, bs = 'cr', k = 10) +
+                      s(bottemp, bs = 'cr', k = 10) +
+                      s(year, bs = 'cr', k = 10) +
+                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                    data = croaker[year <= 2014], family = poisson(),
+                    control =  gam.control(scalePenalty = FALSE),
+                    discrete = T, nthreads = 11)
+
+mod_nb_abun <- bam(abundance ~ season + grpsed +
+                     s(depth, bs = 'cr', k = 10) + s(botsalin, bs = 'cr', k = 10) +
+                     s(bottemp, bs = 'cr', k = 10) +
+                     s(year, bs = 'cr', k = 10) +
+                     s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                   data = croaker[year <= 2014], family = nb(),
+                   control =  gam.control(scalePenalty = FALSE),
+                   discrete = T, nthreads = 11)
+
+mod_zip_abun <- bam(abundance ~ season + grpsed +
+                      s(depth, bs = 'cr', k = 10) + s(botsalin, bs = 'cr', k = 10) +
+                      s(bottemp, bs = 'cr', k = 10) +
+                      s(year, bs = 'cr', k = 10) +
+                      s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                    data = croaker[year <= 2014], family = ziP(),
+                    control =  gam.control(scalePenalty = FALSE),
+                    discrete = T, nthreads = 11)
+
+abun <- list(nb = mod_nb_abun,
+             poi = mod_poi_abun,
+             tw = mod_tw_abun,
+             zip = mod_zip_abun)
+saveRDS(abun, 'bam_all_predictors.rds')
+
+
+nb_nosed <- bam(abundance ~ season +
+                  s(depth, bs = 'cr', k = 10) + s(botsalin, bs = 'cr', k = 10) +
+                  s(bottemp, bs = 'cr', k = 10) +
+                  s(year, bs = 'cr', k = 10) +
+                  s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                data = croaker[year <= 2014], family = nb(),
+                control =  gam.control(scalePenalty = FALSE),
+                discrete = T, nthreads = 11)
+
+nb_nodepth <- bam(abundance ~ season + grpsed +
+                  s(botsalin, bs = 'cr', k = 10) +
+                  s(bottemp, bs = 'cr', k = 10) +
+                  s(year, bs = 'cr', k = 10) +
+                  s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                data = croaker[year <= 2014], family = nb(),
+                control =  gam.control(scalePenalty = FALSE),
+                discrete = T, nthreads = 11)
+
+
+nb_nosal <- bam(abundance ~ season + grpsed +
+                  s(depth, bs = 'cr', k = 10) +
+                  s(bottemp, bs = 'cr', k = 10) +
+                  s(year, bs = 'cr', k = 10) +
+                  s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                data = croaker[year <= 2014], family = nb(),
+                control =  gam.control(scalePenalty = FALSE),
+                discrete = T, nthreads = 11)
+
+nb_nosed_depxseason <- bam(abundance ~
+                  s(depth, by = as.factor(season), bs = 'cr', k = 10) +
+                    s(botsalin, bs = 'cr', k = 10) +
+                  s(bottemp, bs = 'cr', k = 10) +
+                  s(year, bs = 'cr', k = 10) +
+                  s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                data = croaker[year <= 2014], family = nb(),
+                control =  gam.control(scalePenalty = FALSE),
+                discrete = T, nthreads = 11)
+
+nb_noseddepseas <- bam(abundance ~
+                             s(botsalin, bs = 'cr', k = 10) +
+                             s(bottemp, bs = 'cr', k = 10) +
+                             s(year, bs = 'cr', k = 10) +
+                             s(X, Y, bs = "spde", k = mesh$n, xt = list(mesh = mesh)),
+                           data = croaker[year <= 2014], family = nb(),
+                           control =  gam.control(scalePenalty = FALSE),
+                           discrete = T, nthreads = 11)
