@@ -38,5 +38,7 @@ all_data <- all_data[as.vector(st_intersects(geometry,
                                              strata$geometry,
                                              sparse = F))]
 
+all_data <- all_data[, -24]
 
-fwrite(all_data, 'data derived/survat_mabsne_only.csv')
+fwrite(all_data, 'data derived/survdat_mabsne_only.csv')
+
