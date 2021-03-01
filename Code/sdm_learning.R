@@ -29,16 +29,51 @@ subs <- cbind(subs, st_coordinates(subs$geometry))
 
 subs <- subs[as.vector(st_intersects(geometry, strata$geometry, sparse = F))]
 
-train <- subs[year < 2014]
+subs1 <- subs[complete.cases(subs[, .(abundance, bottemp, season, X, Y, yr_fac)])]
+subs1 <- subs[, .(abundance, bottemp, season, X, Y, yr_fac, year)]
+subs1 <- subs[, abundance := fifelse(abundance > 0, 1, 0)]
+
+train <- subs1[year <= 2014, -'year']
+test <- subs1[year > 2014, -'year']
 
 
 k <- sdmData(
   formula = abundance ~ season + bottemp + coords(X+Y) + g(yr_fac),
-  train = subs[year < 2014]
+  train = train,
+  test = test
 )
 
 
-m1 <- sdm(abundance ~ f(season) + bottemp + coords(X+Y) + g(yr_fac),
+m1 <- sdm(abundance ~ season + bottemp + coords(X+Y) + g(yr_fac),
           data = k,
           method = 'glm')
 ?sf::as_Spatial
+
+
+
+
+
+
+
+file <- system.file("external/pa_df.csv", package="sdm")
+
+df <- read.csv(file)
+
+head(df)
+
+df$sp <- rpois(nrow(df), 0.3)
+
+d <- sdmData(sp~b15+NDVI,train=df)
+
+d
+
+
+
+m <- sdm(sp~b15+NDVI,data=d,methods=c('glm','gam','gbm'),
+         modelSettings = list(glm = list(family = poisson()),
+                              gam = list(family = poisson()),
+                              gbm = list(distribution = 'poisson')))
+
+m
+
+k <- gam(sp~s(b15)+s(NDVI), family = poisson(), data = df)
