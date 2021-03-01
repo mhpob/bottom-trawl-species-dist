@@ -16,3 +16,6 @@ survdat_names_sed.csv
 
 # Big model output
 data derived/model output/*.RDS
+
+# Temporary file (mainly Excel/Word)
+~$*
