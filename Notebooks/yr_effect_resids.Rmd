@@ -1,0 +1,228 @@
+---
+title: "Visualize change in distribution using residuals of year effect"
+author: "Mike O'Brien"
+date: 'Week of 2021-03-14'
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 4
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  dev = "png", dpi = 144
+)
+```
+
+### Atlantic croaker, presence only
+
+```{r}
+library(sf);library(data.table); library(mgcv)
+
+load_species_data <- function(species){
+
+  all_data <- fread("data derived/survdat_mabsne_only.csv")
+
+  station_key <- unique(all_data,
+                        by = c('cruise6', 'station', 'stratum', 'tow',
+                               'year', 'season'))
+  station_key[, 18:23 := NULL]
+
+  species_data <- all_data[comname == species]
+
+  species_data <- species_data[station_key, on = names(station_key)]
+
+  species_data[, abundance := fifelse(is.na(abundance), 0, abundance)]
+
+  species_data <- st_as_sf(species_data,
+                           coords = c('lon', 'lat'),
+                           remove = F,
+                           crs = 4326) %>%
+    st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+  species_data <- setDT(species_data)
+  # [
+  #   complete.cases(species_data[, .(season, bottemp, botsalin,
+  #                                   grpsed, year, depth,
+  #                                   lat, lon)])]
+
+  species_data[, ':='(X = st_coordinates(geometry)[, 1],
+                      Y = st_coordinates(geometry)[, 2])]
+}
+
+spec_abun <- load_species_data('atlantic croaker')
+spec_pres <- spec_abun[abundance > 0]
+spec_pres[, season := as.factor(season)]
+
+spec_pres
+```
+
+
+### Simple model
+Uses only a year-by-season interaction and a spatial smooth.
+
+```{r echo=TRUE}
+mod <- gam(abundance ~ s(year, by = season, k = 10) +
+             s(X, Y, bs = 'tp'),
+           family = poisson(),
+           data = spec_pres,
+           method = 'REML')
+
+```
+
+
+### Partial effect of $year$ for each $season$
+
+```{r}
+preds <- predict(mod, type = 'iterms', se = T)
+
+preds <- setDT(cbind(
+  spec_pres,
+  pred = exp(preds$fit),
+  lci = exp(preds$fit - 1.96 * preds$se.fit),
+  uci = exp(preds$fit + 1.96 * preds$se.fit)
+))
+
+library(ggplot2)
+
+
+ggplot(data =  preds[season == 'FALL']) +
+  geom_ribbon(aes(x = year, 
+                  ymin = `lci.s(year):seasonFALL`,
+                  ymax = `uci.s(year):seasonFALL`),
+            fill = 'lightgray') +
+  geom_line(aes(x = year,
+                y = `pred.s(year):seasonFALL`)) +
+  labs(x = NULL, y = 'Partial effect of year (fall season)') +
+  theme_bw()
+
+ggplot(data =  preds[season == 'SPRING']) +
+  geom_ribbon(aes(x = year, 
+                  ymin = `lci.s(year):seasonSPRING`,
+                  ymax = `uci.s(year):seasonSPRING`),
+            fill = 'lightgray') +
+  geom_line(aes(x = year,
+                y = `pred.s(year):seasonSPRING`)) +
+  labs(x = NULL, y = 'Partial effect of year (spring season)') +
+  theme_bw()
+```
+
+
+### Effect of $year$ removed, summed within stations
+
+```{r}
+spec_pres[, ':='(yr.rm = resid(mod),
+                 cut_7y = cut(year, seq(1963, 2019, 7)))]
+spec_pres_agg <- spec_pres[,
+                           .(abundance = sum(yr.rm, na.rm = T),
+                             x = mean(st_coordinates(geometry)[,1]),
+                             y = mean(st_coordinates(geometry)[,2])),
+                           by = c('station', 'stratum', 'tow', 'cut_7y', 'season')]
+
+ggplot() +
+  # geom_sf(data = coast, color = 'lightgray') +
+  geom_point(data = setorder(spec_pres_agg, abundance)[season == 'FALL'],
+             aes(x = x, y = y, color = abundance)) +
+  coord_sf(xlim = c(-2e5, 2.1e5), ylim = c(3.6e6, 4.35e6)) +
+  scale_color_viridis_c(option = 'inferno') +
+  labs(x = NULL, y = NULL, color = 'Abundance') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+
+ggplot() +
+  # geom_sf(data = coast, color = 'lightgray') +
+  geom_point(data = setorder(spec_pres_agg, abundance)[season == 'SPRING'],
+             aes(x = x, y = y, color = abundance)) +
+  coord_sf(xlim = c(-2e5, 2.1e5), ylim = c(3.6e6, 4.35e6)) +
+  scale_color_viridis_c(option = 'inferno') +
+  labs(x = NULL, y = NULL, color = 'Abundance') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+```
+
+### Effect of $year$, gridded and summed across $season$
+
+```{r}
+coast <- read_sf('data derived/mapping/coast_crop.shp') %>% 
+  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+
+strata_info <- fread('data/svdbs_supporttables/svdbs_svmstrata.csv')
+
+strata <- read_sf('data/mapping/strata/strata.shp')
+setDT(strata)
+
+strata <- strata[strata_info, on = c('STRATA' = 'stratum')]
+strata <- strata[grepl('MAB|SNE', stratum_name)]
+strata[, geometry :=
+         st_transform(geometry, crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')]
+
+strata <- strata[, .(geometry = st_union(geometry))]
+
+
+
+
+
+
+
+grid <- st_make_grid(strata$geometry, cellsize = 10*1000)
+
+grid <- grid[st_covered_by(grid, strata$geometry, sparse = F) |
+                st_overlaps(grid, strata$geometry, sparse = F)]
+
+grid_dt <- data.table(geometry = grid,
+                   id = seq_along(grid))
+
+spec_grid <- st_join(st_as_sf(grid_dt), st_as_sf(spec_pres))
+
+hold <- setDT(spec_grid)[, .(yr.rm = sum(yr.rm),
+                             geometry = geometry), by = c('cut_7y', 'id')]
+```
+
+```{r}
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_sf(data = hold[!is.na(cut_7y)], aes(geometry = geometry, fill = yr.rm),
+          color = NA) +
+  coord_sf(xlim = c(-183300, 446900), ylim = c(3668000, 4448000)) +
+  scale_fill_viridis_c(option = 'inferno') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+```
+
+### Effect of $year$, per $season$
+
+```{r}
+hold <- setDT(spec_grid)[, .(yr.rm = sum(yr.rm),
+                             geometry = geometry), by = c('cut_7y', 'id', 'season')]
+```
+
+#### Fall
+
+```{r}
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_sf(data = hold[!is.na(cut_7y) &
+                        season == 'FALL'], aes(geometry = geometry, fill = yr.rm),
+          color = NA) +
+  coord_sf(xlim = c(-183300, 446900), ylim = c(3668000, 4448000)) +
+  scale_fill_viridis_c(option = 'inferno') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+```
+
+#### Spring
+
+```{r}
+ggplot() +
+  geom_sf(data = coast, color = 'lightgray') +
+  geom_sf(data = hold[!is.na(cut_7y) &
+                        season == 'SPRING'], aes(geometry = geometry, fill = yr.rm),
+          color = NA) +
+  coord_sf(xlim = c(-183300, 446900), ylim = c(3668000, 4448000)) +
+  scale_fill_viridis_c(option = 'inferno') +
+  facet_wrap(~ cut_7y, ncol = 4) +
+  theme_minimal()
+```

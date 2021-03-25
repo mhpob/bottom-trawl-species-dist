@@ -26,15 +26,70 @@ knitr::opts_chunk$set(
 ```{r}
 library(ggplot2); library(sf); library(data.table)
 
-all_data <- fread('data derived/survdat_mabsne_only.csv')
+all_data <- fread("data derived/survdat_mabsne_only.csv")
 
 station_key <- unique(all_data,
                       by = c('cruise6', 'station', 'stratum', 'tow',
                              'year', 'season'))
-station_key[, 18:24 := NULL]
+station_key[, 18:23 := NULL]
 
 croaker <- all_data[comname == 'atlantic croaker']
+
 croaker <- croaker[station_key, on = names(station_key)]
+
+croaker[, abundance := fifelse(is.na(abundance), 0, abundance)]
+
+croaker <- st_as_sf(croaker,
+                    coords = c('lon', 'lat'),
+                    remove = F,
+                    crs = 4326) %>% 
+  st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+croaker <- setDT(croaker)[complete.cases(croaker[, .(season, bottemp, botsalin,
+                                                     depth, grpsed, year,
+                                                     lat, lon)])]
+
+croaker[, ':='(X = st_coordinates(geometry)[, 1],
+               Y = st_coordinates(geometry)[, 2])]
+```
+
+```{r}
+source("miller et al. supp/mgcv_spde_smooth.R") 
+
+library(mgcv); library(INLA)
+strata_info <- fread('data/svdbs_supporttables/svdbs_svmstrata.csv')
+
+strata <- read_sf('data/mapping/strata/strata.shp')
+setDT(strata)
+
+strata <- strata[strata_info, on = c('STRATA' = 'stratum')]
+strata <- strata[grepl('MAB|SNE', stratum_name)]
+strata[, geometry :=
+         st_transform(geometry, crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')]
+
+strata <- strata[, .(geometry = st_union(geometry))]
+
+strata[, geometry := st_simplify(geometry,
+                                 preserveTopology = F,
+                                 dTolerance = 5000)]
+
+boundary <- inla.sp2segment(as_Spatial(strata$geometry))
+# make mesh using meshbuilder 'cause it's finnicky
+# meshbuilder()
+
+mesh <- inla.mesh.2d(boundary=boundary,
+                     max.edge=c(22000, 108000),
+                     min.angle=c(30, 21),
+                     
+                     ## Safeguard against large meshes.
+                     max.n=c(48000, 16000),
+                     
+                     ## Don't build a huge mesh!
+                     max.n.strict=c(128000, 128000),
+                     
+                     ## Filter away adjacent points.
+                     cutoff=8000,
+                     offset=c(1000, 55000))
 ```
 
 ## References
