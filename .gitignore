@@ -8,8 +8,8 @@
 compiled_bottom_type*
 
 # Compiled notbooks/reports
-notebooks/*.pdf
-notebooks/*.html
+notebooks/**/*.pdf
+notebooks/**/*.html
 
 # Extracted data
 survdat_names_sed.csv
