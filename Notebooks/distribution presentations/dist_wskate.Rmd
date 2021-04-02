@@ -1,0 +1,419 @@
+---
+title: "Winter skate distribution through time"
+author: "Mike O'Brien"
+date: "3/29/2021"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = TRUE)
+```
+
+```{r}
+library(ggplot2); library(concaveman); library(sf); library(data.table)
+
+load_species_data <- function(species){
+  
+  all_data <- fread('data derived/survdat_names_sed.csv')
+  
+  ## Drop length
+  all_data[, c('length', 'numlen') := NULL]
+  
+  ## Drop redundant
+  all_data <- unique(all_data, by = names(all_data)[1:21])
+  
+  station_key <- unique(all_data,
+                        by = c('cruise6', 'station', 'stratum', 'tow',
+                               'year', 'season'))
+  station_key[, 18:23 := NULL]
+
+  species_data <- all_data[comname == species]
+
+  species_data <- species_data[station_key, on = names(station_key)]
+
+  species_data[, abundance := fifelse(is.na(abundance), 0, abundance)]
+
+  species_data <- st_as_sf(species_data,
+                           coords = c('lon', 'lat'),
+                           remove = F,
+                           crs = 4326) %>%
+    st_transform(crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')
+
+  species_data <- setDT(species_data)
+  # [
+  #   complete.cases(species_data[, .(season, bottemp, botsalin,
+  #                                   grpsed, year, depth,
+  #                                   lat, lon)])]
+
+  species_data[, ':='(X = st_coordinates(geometry)[, 1],
+                      Y = st_coordinates(geometry)[, 2])]
+}
+
+spec <- load_species_data('winter skate')
+spec <- spec[abundance > 0]
+spec[, season := as.factor(season)]
+
+com <- spec[, .(x_wt = sum(abundance * X)/sum(abundance),
+                    y_wt = sum(abundance * Y)/sum(abundance)),
+                by = c('year', 'season')]
+com <- st_as_sf(com, coords = c('x_wt', 'y_wt'),
+                crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74',
+                remove = F)
+
+
+con_hull <- spec[, concaveman(st_as_sf(geometry), 3, 1000), by = c('year', 'season')]
+
+
+
+coast <- read_sf('data derived/mapping/coast_crop.shp') %>% 
+  st_transform(st_crs('+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74'))
+
+
+strata_info <- fread('data/svdbs_supporttables/svdbs_svmstrata.csv')
+
+strata <- read_sf('data/mapping/strata/strata.shp')
+setDT(strata)
+
+strata <- strata[strata_info, on = c('STRATA' = 'stratum')]
+# strata <- strata[grepl('MAB|SNE', stratum_name)]
+strata[, geometry :=
+         st_transform(geometry, crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74')]
+
+strata <- strata[, .(geometry = st_union(geometry))]
+
+
+
+
+
+
+
+grid <- st_make_grid(strata$geometry, cellsize = 10*1000)
+
+grid <- grid[st_covered_by(grid, strata$geometry, sparse = F) |
+                st_overlaps(grid, strata$geometry, sparse = F)]
+
+grid_dt <- data.table(geometry = grid,
+                   id = seq_along(grid))
+
+spec_grid <- st_join(st_as_sf(grid_dt), st_as_sf(spec))
+
+
+abun_grid <- setDT(spec_grid)[, .(med_abun = median(abundance, na.rm = T),
+                                  geometry = geometry),
+                              by = c('id', 'year', 'season')]
+
+
+
+plot_fun <- function(yr){
+  ggplot() +
+    geom_sf(data = coast) +
+    geom_sf(data = con_hull[year == yr],
+            aes(geometry = polygons)) +
+    geom_sf(data = abun_grid[year == yr],
+            aes(geometry = geometry, fill = med_abun), color = NA) +
+    geom_sf(data = com[com$year == yr,], size = 5, shape = 8) +
+    coord_sf(xlim = c(-4e5, 4.6e5), ylim = c(3.4e6, 4.6e6)) +
+    scale_fill_viridis_c(option = 'plasma') +
+    facet_wrap(~season, drop = F) +
+    theme_minimal()
+}
+
+```
+
+## Change in center of mass (longitude)
+```{r}
+ggplot() +
+  geom_line(data = com, aes(x = year, y = x_wt)) +
+  coord_flip() + 
+  facet_wrap(~season) +
+  labs(x = NULL, y = 'Eastings') +
+  theme_bw()
+```
+
+
+## Change in center of mass (latitude)
+```{r}
+ggplot() +
+  geom_line(data = com, aes(x = year, y = y_wt)) +
+  facet_wrap(~season) +
+  labs(x = NULL, y = 'Northings') +
+  theme_bw()
+```
+
+## Change in area of concave hull
+```{r}
+ggplot(data = con_hull) +
+  geom_line(aes(x = year, y = as.numeric(st_area(polygons))/1e6)) +
+  labs(x = NULL, y = 'Area (km^2)') +
+  facet_wrap(~season) +
+  theme_bw()
+```
+
+
+
+## 1967
+```{r}
+plot_fun(1967)
+```
+
+## 1968
+```{r}
+plot_fun(1968)
+```
+
+## 1969
+```{r}
+plot_fun(1969)
+```
+
+## 1970
+```{r}
+plot_fun(1970)
+```
+
+## 1971
+```{r}
+plot_fun(1971)
+```
+
+## 1972
+```{r}
+plot_fun(1972)
+```
+
+## 1973
+```{r}
+plot_fun(1973)
+```
+
+## 1974
+```{r}
+plot_fun(1974)
+```
+
+## 1975
+```{r}
+plot_fun(1975)
+```
+
+## 1976
+```{r}
+plot_fun(1976)
+```
+
+## 1977
+```{r}
+plot_fun(1977)
+```
+
+## 1978
+```{r}
+plot_fun(1978)
+```
+
+## 1979
+```{r}
+plot_fun(1979)
+```
+
+## 1980
+```{r}
+plot_fun(1980)
+```
+
+## 1981
+```{r}
+plot_fun(1981)
+```
+
+## 1982
+```{r}
+plot_fun(1982)
+```
+
+## 1983
+```{r}
+plot_fun(1983)
+```
+
+## 1984
+```{r}
+plot_fun(1984)
+```
+
+## 1985
+```{r}
+plot_fun(1985)
+```
+
+## 1986
+```{r}
+plot_fun(1986)
+```
+
+## 1987
+```{r}
+plot_fun(1987)
+```
+
+## 1988
+```{r}
+plot_fun(1988)
+```
+
+## 1989
+```{r}
+plot_fun(1989)
+```
+
+## 1990
+```{r}
+plot_fun(1990)
+```
+
+## 1991
+```{r}
+plot_fun(1991)
+```
+
+## 1992
+```{r}
+plot_fun(1992)
+```
+
+## 1993
+```{r}
+plot_fun(1993)
+```
+
+## 1994
+```{r}
+plot_fun(1994)
+```
+
+## 1995
+```{r}
+plot_fun(1995)
+```
+
+## 1996
+```{r}
+plot_fun(1996)
+```
+
+## 1997
+```{r}
+plot_fun(1997)
+```
+
+## 1998
+```{r}
+plot_fun(1998)
+```
+
+## 1999
+```{r}
+plot_fun(1999)
+```
+
+## 2000
+```{r}
+plot_fun(2000)
+```
+
+## 2001
+```{r}
+plot_fun(2001)
+```
+
+## 2002
+```{r}
+plot_fun(2002)
+```
+
+## 2003
+```{r}
+plot_fun(2003)
+```
+
+## 2004
+```{r}
+plot_fun(2004)
+```
+
+## 2005
+```{r}
+plot_fun(2005)
+```
+
+## 2006
+```{r}
+plot_fun(2006)
+```
+
+## 2007
+```{r}
+plot_fun(2007)
+```
+
+## 2008
+```{r}
+plot_fun(2008)
+```
+
+## 2009
+```{r}
+plot_fun(2009)
+```
+
+## 2010
+```{r}
+plot_fun(2010)
+```
+
+## 2011
+```{r}
+plot_fun(2011)
+```
+
+## 2012
+```{r}
+plot_fun(2012)
+```
+
+## 2013
+```{r}
+plot_fun(2013)
+```
+
+## 2014
+```{r}
+plot_fun(2014)
+```
+
+## 2015
+```{r}
+plot_fun(2015)
+```
+
+## 2016
+```{r}
+plot_fun(2016)
+```
+
+## 2017
+```{r}
+plot_fun(2017)
+```
+
+## 2018
+```{r}
+plot_fun(2018)
+```
+
+## 2019
+```{r}
+plot_fun(2019)
+```
+
+

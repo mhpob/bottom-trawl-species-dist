@@ -1,0 +1,110 @@
+---
+title: "Bottom water temperature"
+author: "Mike O'Brien"
+date: "4/1/2021"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = TRUE)
+```
+
+```{r}
+library(ggplot2); library(data.table); library(mgcv)
+
+all_data <- fread('data derived/survdat_names_sed.csv')
+coast <- sf::read_sf('data derived/mapping/coast_crop.shp')
+
+station_key <- unique(all_data,
+                      by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season'))
+
+station_key[, date := lubridate::floor_date(est_towdate, 'day')]
+station_key[, date := as.factor(date)]
+
+new_dat <- expand.grid(lon = seq(min(station_key$lon), max(station_key$lon), length.out = 100),
+                       lat = seq(34.8, max(station_key$lat), length.out = 100))
+
+
+mod_func <- function(yr){
+  model_fall <- tryCatch(
+    gam(bottemp ~ te(lat, lon) + s(date, bs = 're'),
+        data = station_key[season == 'FALL' & lat > 34.8 & year == yr],
+        method = 'REML'),
+    error = function(e) return(NA)
+  )
+  
+  model_spring <- tryCatch(
+    gam(bottemp ~ te(lat, lon) + s(date, bs = 're'),
+        data = station_key[season == 'SPRING' & lat > 34.8 & year == yr],
+        method = 'REML'),
+    error = function(e) return(NA)
+  )
+  
+  pred_func <- function(model){
+    if(any(class(model) == 'logical')) NA
+    else{
+    new_dat_inner <- cbind(new_dat,
+                           date = model$model$date[1])
+    pred <- predict(model, new_dat_inner, type = 'response',
+                    exclude = 's(date)', newdata.guaranteed = T)
+    
+    tf <- exclude.too.far(new_dat_inner$lon, new_dat_inner$lat,
+                          station_key$lon, station_key$lat, dist = 0.01)
+    
+    new_dat_inner <- cbind(new_dat_inner, pred)
+    new_dat_inner <- new_dat_inner[!tf,]
+    new_dat_inner <- new_dat_inner
+    
+    list(new_dat_inner,
+         model$model)
+    }
+  }
+ 
+  fall <- pred_func(model_fall)
+  fall <- lapply(fall, function(.) data.frame(., season = 'fall'))
+  
+  spring <- pred_func(model_spring)
+  spring <- lapply(spring, function(.) data.frame(., season = 'spring'))
+  
+  if(ncol(fall[[1]]) == ncol(spring[[1]])){
+    list(rbind(fall[[1]], spring[[1]]),
+         rbind(fall[[2]], spring[[2]]))
+  } else{
+    fall
+  }
+    
+}
+
+
+
+```
+
+
+```{r, results="asis"}
+for(i in seq(min(station_key$year), max(station_key$year), 1)){
+  
+  cat("\n") 
+  cat("##", i, "\n") # Create new slides with the names.
+  
+  out <- mod_func(i)
+  print(
+    
+    ggplot() +
+      geom_point(data = out[[1]], aes(x = lon, y = lat, color = pred))+
+      scale_color_viridis_c(option = 'plasma', limits = c(0, 35))+
+      geom_sf(data = coast) +
+      geom_point(data = out[[2]],
+                 aes(x = lon, y = lat), size = 0) +
+      coord_sf(xlim = c(-76, -64), ylim = c(34.8, 45)) +
+      labs(x = NULL, y = NULL) +
+      facet_wrap(~ season)
+    
+  )
+  
+  cat("\n")
+  
+}
+
+```
+
