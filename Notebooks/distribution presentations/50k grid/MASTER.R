@@ -115,4 +115,3 @@ for(i in 1:length(target_species)){
          params = list(species = target_species[i]),
          output_file = paste0(target_species[i], ".html"))
 }
-

@@ -1,7 +1,7 @@
 ---
 params:
   species: !r
-title: "`r paste(params$species, 'distribution through time \n 50 km x 50 km grid')`"
+title: "`r paste(params$species, 'distribution through time <br>50 km x 50 km grid')`"
 output: ioslides_presentation
 
 ---
@@ -12,25 +12,26 @@ knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = TR
 
 ```{r}
 plot_fun <- function(yr){
-  sub_plot <- function(season){
+  sub_plot <- function(yr, ssn){
     ggplot() +
       geom_sf(data = coast) +
-      geom_sf(data = con_hull[year == yr & season == season],
+      geom_sf(data = con_hull[year == yr & season == ssn],
               aes(geometry = polygons)) +
-      geom_sf(data = abun_grid[year == yr & season == season],
+      geom_sf(data = abun_grid[year == yr & season == ssn],
               aes(geometry = geometry, fill = med_abun), color = NA) +
-      geom_sf(data = com[com$year == yr & com$season == season,], size = 5, shape = 8) +
+      geom_sf(data = com[com$year == yr & com$season == ssn,], size = 5, shape = 8) +
       coord_sf(xlim = c(-4e5, 4.6e5), ylim = c(3.4e6, 4.6e6)) +
       scale_fill_viridis_c(option = 'plasma') +
-      labs(subtitle = season, fill = 'Med. \nabund.') +
+      labs(subtitle = ssn, fill = 'Med. \nabund.') +
       theme_minimal() +
       theme(legend.position = c(0.9, 0.25))
   }
   
-  sub_plot('SPRING') + sub_plot('FALL')
+  sub_plot(yr, 'FALL') + sub_plot(yr, 'SPRING')
+
 }
 
-plo```
+```
 
 
 
