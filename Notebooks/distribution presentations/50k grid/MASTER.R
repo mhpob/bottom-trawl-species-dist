@@ -1,5 +1,6 @@
 library(rmarkdown)
-library(ggplot2); library(concaveman); library(sf); library(data.table)
+library(concaveman); library(sf); library(data.table)
+library(ggplot2); library(patchwork)
 
 all_data <- fread('data derived/survdat_names_sed.csv')
 
@@ -35,7 +36,20 @@ all_data[, ':='(X = st_coordinates(geometry)[, 1],
                 Y = st_coordinates(geometry)[, 2],
                 season = as.factor(season))]
 
-target_species <- c('atlantic croaker')
+target_species <- c('atlantic croaker',
+                    'summer flounder',
+                    'black sea bass',
+                    'scup',
+                    'little skate',
+                    'spotted hake',
+                    'northern searobin',
+                    'silver hake',
+                    'weakfish',
+                    'smooth dogfish',
+                    'red hake',
+                    'winter skate',
+                    'bluntnose stingray',
+                    'american lobster')
 
 
 
