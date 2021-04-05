@@ -98,12 +98,7 @@ for(i in 1:length(target_species)){
                            "distribution presentations",
                            "50k grid",
                            "template.Rmd"),
-         params = list(species = target_species[i]
-                       # ,
-                       # com = com,
-                       # con_hull = con_hull,
-                       # station_key = station_key
-                       ),
+         params = list(species = target_species[i]),
          output_file = paste0(target_species[i], ".html"))
 }
 
