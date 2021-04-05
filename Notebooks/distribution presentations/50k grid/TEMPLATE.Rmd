@@ -27,7 +27,7 @@ plot_fun <- function(yr){
       theme(legend.position = c(0.9, 0.25))
   }
   
-  sub_plot(yr, 'FALL') + sub_plot(yr, 'SPRING')
+  sub_plot(yr, 'SPRING') + sub_plot(yr, 'FALL')
 
 }
 
@@ -40,7 +40,7 @@ plot_fun <- function(yr){
 ggplot() +
   geom_line(data = com, aes(x = year, y = x_wt)) +
   coord_flip() + 
-  facet_wrap(~season) +
+  facet_wrap(~ season) +
   labs(x = NULL, y = 'Eastings') +
   theme_bw()
 ```

@@ -34,7 +34,9 @@ all_data <- setDT(all_data)
 all_data <- all_data[abundance > 0]
 all_data[, ':='(X = st_coordinates(geometry)[, 1],
                 Y = st_coordinates(geometry)[, 2],
-                season = as.factor(season))]
+                season = factor(season,
+                                ordered = T,
+                                levels = c('SPRING', 'FALL')))]
 
 target_species <- c('atlantic croaker',
                     'summer flounder',
