@@ -1,0 +1,155 @@
+---
+title: "21°C bottom water temperature<br>through time"
+author: "Mike O'Brien"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = TRUE)
+```
+
+```{r}
+library(ggplot2); library(sf); library(data.table); library(mgcv)
+
+all_data <- fread('data derived/survdat_names_sed.csv')
+coast <- read_sf('data derived/mapping/coast_crop.shp')
+
+station_key <- unique(all_data,
+                      by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season'))
+
+station_key[, date := lubridate::floor_date(est_towdate, 'day')]
+station_key[, date := as.factor(date)]
+station_key[, season := factor(season,
+                               levels = c('SPRING', 'FALL'),
+                               ordered = T)]
+
+station_key <- station_key[lat > 34.8]
+models <- split(station_key, by = c('year', 'season'))
+
+models <- lapply(models,
+                 function(.){
+                   tryCatch(
+                     gam(bottemp ~ te(lat, lon) + s(date, bs = 're'),
+                         data = .,
+                         method = 'REML'),
+                     error = function(e) return(NULL)
+                   )
+                 }
+)
+models <- models[!sapply(models, is.null)]
+
+
+new_dat <- st_as_sf(station_key,
+                    coords = c('lon', 'lat'),
+                    crs = 4326)
+new_dat <- st_make_grid(new_dat, n = c(100, 100))
+new_dat <- data.table(geometry = new_dat)[, id := .I]
+
+new_dat <- new_dat[, cent := st_centroid(geometry)]
+new_dat <- new_dat[, ':='(lon = st_coordinates(cent)[, 1],
+                          lat = st_coordinates(cent)[, 2])]
+new_dat <- new_dat[!exclude.too.far(new_dat$lon, new_dat$lat,
+                                    station_key$lon, station_key$lat, dist = 0.01)]
+
+
+fitted <- lapply(models, function(.){
+  new_dat_inner <- cbind(new_dat,
+                         date = .$model$date[1])
+  pred <- predict(., new_dat_inner, type = 'response',
+                  exclude = 's(date)', newdata.guaranteed = T)
+  
+  tf <- exclude.too.far(new_dat_inner$lon, new_dat_inner$lat,
+                        station_key$lon, station_key$lat, dist = 0.01)
+  
+  
+  
+  new_dat_inner <- cbind(new_dat_inner, pred)
+  new_dat_inner <- new_dat_inner[pred %between% c(21 - 2.5, 21 + 2.5),]
+  
+  new_dat_inner
+})
+
+  
+fitted <- rbindlist(fitted, idcol = 'year')
+fitted[, ':='(year = gsub('\\..*','', year),
+         season = gsub('.*\\.','', year))]
+fitted[, season := factor(season, levels = c('SPRING', 'FALL'),
+                     ordered = T)]
+
+
+
+## Center of mass
+com_obs <- station_key[between(bottemp, 18.5, 23.5),
+                   .(lat = mean(lat),
+                     lon = mean(lon),
+                     type = 'Observed'),
+                   by = c('year', 'season')]
+
+com_pred <- fitted[,.(lat = mean(lat),
+                     lon = mean(lon),
+                     type = 'Predicted'),
+                   by = c('year', 'season')]
+
+com <- rbind(com_obs,
+             com_pred)
+
+```
+
+
+## Note:
+In previous GAMM iterations, Atlantic croaker seemed to have the highest abundance around 21°C. The following figures will show the center of mass of temperatures in a 5°C window around 21°C (21 ± 2.5°C).
+
+
+## Change in center of mass (longitude)
+```{r}
+ggplot() +
+  geom_line(data = com, aes(x = as.numeric(year), y = lon, lty = type)) +
+  coord_flip() + 
+  facet_wrap(~ season) +
+  labs(x = NULL, y = 'Degrees', lty = NULL) +
+  theme_bw()
+```
+
+
+## Change in observed center of mass (latitude)
+```{r}
+ggplot() +
+  geom_line(data = com, aes(x = as.numeric(year), y = lat, lty = type)) +
+  facet_wrap(~season) +
+  labs(x = NULL, y = 'Degrees', lty = NULL) +
+  theme_bw()
+```
+
+
+
+```{r, results="asis"}
+for(i in seq(min(station_key$year), max(station_key$year), 1)){
+  
+  cat("\n") 
+  cat("##", i, "\n") # Create new slides with the names.
+  
+  print(
+    
+    ggplot() +
+      geom_sf(data = fitted[year == i], aes(geometry = geometry, fill = pred,
+                                            alpha = -abs(21 - pred)), color = NA)+
+      scale_fill_viridis_c(option = 'plasma', limits = c(18.5, 23.5)) +
+      scale_alpha(guide = 'none') +
+      geom_sf(data = coast) +
+      geom_point(data = station_key[year == i],
+                 aes(x = lon, y = lat), size = 0) +
+      geom_point(data = com[year == i], aes(x = lon, y = lat, shape = type)) +
+      coord_sf(xlim = c(-76, -64), ylim = c(34.8, 45)) + 
+      labs(x = NULL, y = NULL, fill = 'Pred.\ntemp', shape = 'COM\ntype') +
+      facet_wrap(~ season, drop = F) +
+      theme_minimal()
+    
+  )
+  
+  cat("\n")
+  
+}
+
+```
+
