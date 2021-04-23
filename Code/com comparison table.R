@@ -52,14 +52,27 @@ all_data[, ':='(X = st_coordinates(geometry)[, 1],
 # Select trawls after 1967 that have a species listed.
 com <- all_data[year >= 1967 & comname != ""]
 
-# Select only species that have been caught off Delmarva at least once
-com <- com[comname %in% unique(com[between(lat, 37, 39), comname])]
-
 com <- com[, .(x = sum(abundance * X)/sum(abundance),
                y = sum(abundance * Y)/sum(abundance),
                depth = sum(abundance * depth)/sum(abundance)),
            by = c('year', 'season', 'comname')]
 
+# Select only species where 75% of COM is in MAB (Hatteras to Nantucket)
+target_spp <- st_as_sf(com,
+                       coords = c('x', 'y'),
+                       crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74',
+                       remove = F) %>%
+  st_transform(4326)
+setDT(target_spp)[, ':='(lon = st_coordinates(geometry)[, 1],
+                  lat = st_coordinates(geometry)[, 2])]
+
+
+target_spp <- target_spp[lat %between% c(35.2, 41.2)]
+
+target_spp <- target_spp[, .N, by = .(comname, season)]
+target_spp <- unique(target_spp[N > (2019-1967) * 0.75]$comname)
+
+com <- com[comname %in% target_spp]
 
 com <- melt(com, measure.vars = c('x', 'y', 'depth'))
 
@@ -84,7 +97,7 @@ com <- com[order(comname, season)]
 com <- com[, .(comname, season, n, slope_y, slope_p_y, slope_x,
                slope_p_x, slope_depth, slope_p_depth)]
 
-fwrite(com, 'data derived/COM slopes.csv')
+fwrite(com, 'data derived/COM slopes_75pctincl.csv')
 
 # com <- st_as_sf(com, coords = c('x_wt', 'y_wt'),
                 # crs = '+proj=aea +lat_1=33 +lat_2=45 +lon_0=-74',
