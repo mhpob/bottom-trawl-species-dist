@@ -13,6 +13,7 @@ notebooks/**/*.html
 
 # Extracted data
 survdat_names_sed.csv
+demersal.csv
 
 # Big model output
 data derived/model output/*.RDS
