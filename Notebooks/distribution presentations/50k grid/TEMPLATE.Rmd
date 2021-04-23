@@ -38,10 +38,10 @@ plot_fun <- function(yr){
 ## Change in center of mass (longitude)
 ```{r}
 ggplot() +
-  geom_line(data = com, aes(x = year, y = x_wt)) +
+  geom_line(data = com, aes(x = year, y = x_wt/1000)) +
   coord_flip() + 
   facet_wrap(~ season) +
-  labs(x = NULL, y = 'Eastings') +
+  labs(x = NULL, y = 'Eastings (km)') +
   theme_bw()
 ```
 
@@ -49,9 +49,9 @@ ggplot() +
 ## Change in center of mass (latitude)
 ```{r}
 ggplot() +
-  geom_line(data = com, aes(x = year, y = y_wt)) +
+  geom_line(data = com, aes(x = year, y = y_wt/1000)) +
   facet_wrap(~season) +
-  labs(x = NULL, y = 'Northings') +
+  labs(x = NULL, y = 'Northings (km)') +
   theme_bw()
 ```
 
