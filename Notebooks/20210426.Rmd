@@ -1,0 +1,125 @@
+---
+title: "Are species found in warmer water?"
+author: "Mike O'Brien"
+date: 'Week of 2021-04-26'
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 4
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE,
+  dev = "png", dpi = 144
+)
+```
+
+```{r}
+library(data.table); library(mgcv); library(gratia)
+
+# Import station key
+station_key <- fread('data derived/survdat_names_sed.csv')
+station_key <- unique(station_key,
+                      by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season'))
+station_key[, 18:25 := NULL]
+
+# IMport demersal species selected via inclusion rule in "com comparison table.R"
+demersal_spp <- fread('data derived/demersal.csv')[
+  comname %in%
+    fread('data derived/COM slopes_dem75pctincl.csv',
+          select = 'comname')$comname]
+
+
+# Some species (scallops) have negative abundance
+#   Assume this is a code and the abundance should be positive
+demersal_spp[, abundance := abs(abundance)]
+
+# Sum across sex/age classes
+demersal_spp[, ':='(abundance = sum(abundance, na.rm = T),
+                    biomass = sum(biomass, na.rm = T)),
+             by = c('cruise6', 'station', 'stratum', 'tow',
+                             'year', 'season', 'comname')]
+
+# Pick unique tows
+demersal_spp <- unique(demersal_spp,
+                       by = c('cruise6', 'station', 'stratum', 'tow',
+                              'year', 'season', 'comname'))
+
+
+# Add in all tows where catch was 0 for each species
+demersal_spp <- demersal_spp[, .SD[station_key, on = names(station_key)], by = 'comname']
+demersal_spp[, ':='(abundance = fifelse(is.na(abundance), 0, abundance),
+                    biomass = fifelse(is.na(biomass), 0, biomass))]
+
+
+# Break into halves
+demersal_spp[, half := as.factor(fifelse(year <= 1998, 'first', 'second'))]
+
+demersal_spp[, yr_fac := as.factor(year)]
+
+unique_spp <- unique(demersal_spp$comname)
+```
+
+I investigated a couple different ways to get at this:
+
+1)  Break into early and late periods, use as an interaction term against the bottom temperature smooth
+2)  Create an interaction smooth between year and bottom temperature.
+3)  Break into early and late periods, compare temperature selection using quotient analysis
+
+```{r resuts = "asis"}
+
+for(i in 1:length(unique_spp)){
+  
+  cat("\n") 
+  cat("##", unique_spp[i], "\n") # Create new slides with the names.
+  
+  cat("\n") 
+  cat('### Difference smooth \n')
+  
+  mod <- gam(abundance ~ te(lon, lat) + s(yr_fac, bs = 're') +
+               s(bottemp, by = half),
+             data = demersal_spp,
+             subset = (comname == unique_spp[i] &
+                         season == 'FALL' &
+                         abundance > 0),
+             family = nb())
+  
+  print(
+    
+    draw(mod)
+    
+  )
+  
+  
+  print(
+    
+    draw(difference_smooths(mod, 's(bottemp)'))
+    
+  )
+  
+  cat("\n")
+  
+  cat('### Interaction smooth \n')
+  
+  mod <- gam(abundance ~ te(lon, lat) +
+               s(bottemp, year),
+             data = demersal_spp,
+             subset = (comname == unique_spp[i] &
+                         season == 'FALL' &
+                         abundance > 0),
+             family = nb())
+  
+  print(
+    
+    draw(mod, select = 2)
+    
+  )
+  
+   cat("\n")
+}
+
+```
+
