@@ -1,0 +1,135 @@
+---
+params:
+  species: !r
+title: "`r paste(params$species, 'distribution through time <br>50 km x 50 km grid')`"
+output: ioslides_presentation
+
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, error = TRUE)
+```
+
+
+```{r}
+plot_fun <- function(yr){
+  sub_plot <- function(yr, ssn){
+    ggplot() +
+      
+      geom_sf(data = com_spec[year == yr & season == ssn],
+              aes(geometry = polygons)) +
+      geom_sf(data = abun_grid[year == yr & season == ssn],
+              aes(geometry = geometry, fill = med_abun), color = NA) +
+      geom_sf(data = com_spec[year == yr & season == ssn], 
+              aes(geometry = geometry), size = 5, shape = 8) +
+      geom_sf(data = com_spec[year == yr & season == ssn],
+              aes(geometry = com_dist_line), color = 'red') +
+      geom_sf(data = coast) +
+      coord_sf(xlim = c(-4e5, 6.7e5), ylim = c(3.4e6, 4.6e6)) +
+      scale_fill_viridis_c(option = 'plasma') +
+      labs(subtitle = ssn, fill = 'Med. \nabund.') +
+      theme_minimal() +
+      theme(legend.position = c(0.9, 0.25))
+  }
+  
+  sub_plot(yr, 'SPRING') + sub_plot(yr, 'FALL')
+
+}
+
+```
+
+
+
+## Longitude center of mass (weighted by abundance) through time 
+```{r}
+ggplot(data = com_spec, aes(x = year, y = x_wt/1000)) +
+  geom_line() +
+  coord_flip() + 
+  geom_smooth(method = 'lm') +
+  facet_wrap(~ season) +
+  labs(x = NULL, y = 'Eastings (km)') +
+  theme_bw()
+```
+
+
+## Latitude center of mass (weighted by abundance) through time
+```{r}
+ggplot(data = com_spec, aes(x = year, y = y_wt/1000)) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  facet_wrap(~season) +
+  labs(x = NULL, y = 'Northings (km)') +
+  theme_bw()
+```
+
+
+## Distance from shore of the center of mass through time
+```{r}
+ggplot(data = com_spec, aes(x = year, y = com_dist / 1000)) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  labs(x = NULL, y = 'Distance from shore (km)') +
+  facet_wrap(~season) +
+  theme_bw()
+```
+
+
+## Distance-from-shore center of mass (site distance weighted by abundance) through time
+```{r}
+ggplot(data = com_spec, aes(x = year, y = dist_wt / 1000)) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  labs(x = NULL, y = 'Distance from shore (km)') +
+  facet_wrap(~season) +
+  theme_bw()
+```
+
+## Depth center of mass (weighted by abundance) through time
+```{r}
+ggplot(data = com_spec, aes(x = year, y = dep_wt)) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  labs(x = NULL, y = 'Depth (ft)') +
+  facet_wrap(~season) +
+  theme_bw()
+```
+
+
+## Bottom temperature center of mass (weighted by abundance) through time
+```{r}
+ggplot(data = com_spec, aes(x = year, y = bt_wt)) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  labs(x = NULL, y = 'Bottom temperature (C)') +
+  facet_wrap(~season) +
+  theme_bw()
+```
+
+
+## Area of concave hull through time
+```{r}
+ggplot(data = com_spec, aes(x = year, y = as.numeric(st_area(polygons))/1e6)) +
+  geom_line() +
+  geom_smooth(method = 'lm') +
+  labs(x = NULL, y = 'Area (km^2)') +
+  facet_wrap(~season) +
+  theme_bw()
+```
+
+
+```{r, results="asis"}
+for(i in seq(1967, 2019, 1)){
+  
+  cat("\n") 
+  cat("##", i, "\n") # Create new slides with the names.
+  
+  print(
+    
+    plot_fun(i)
+    
+  )
+  
+  cat("\n")
+  
+}
+
+```
