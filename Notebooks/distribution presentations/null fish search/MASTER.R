@@ -38,15 +38,21 @@ all_data[, ':='(X = st_coordinates(geometry)[, 1],
                                 ordered = T,
                                 levels = c('SPRING', 'FALL')))]
 
-target_species <- c('horseshoe crab',
-                    'smallmouth flounder',
-                    'shortnose greeneye',
-                    'planehead filefish',
-                    'moustache sculpin',
-                    'lumpfish',
-                    'longnose greeneye',
-                    'fawn cusk-eel',
-                    'conger eel')
+# target_species <- c('horseshoe crab',
+#                     'smallmouth flounder',
+#                     'shortnose greeneye',
+#                     'planehead filefish',
+#                     'moustache sculpin',
+#                     'lumpfish',
+#                     'longnose greeneye',
+#                     'fawn cusk-eel',
+#                     'conger eel')
+
+target_species <- c('blue runner',
+                    'chain dogfish',
+                    'gulf stream flounder')
+
+
 
 all_data <- all_data[comname %in% target_species]
 
